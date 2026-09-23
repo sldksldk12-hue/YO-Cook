@@ -149,9 +149,9 @@ def crawl_and_seed_recipes(target_count: int = 20):
     try:
         # 기존 크롤링 데이터 초기화 및 AUTO_INCREMENT = 1 리셋
         print("[*] 기존 레시피 데이터 TRUNCATE (ID 1번 리셋)...")
+        # 기존 데이터를 지우지 않고 추가만 하고 싶을 때는 아래 7줄 앞에 # 을 붙여 비활성화
         with engine.connect() as conn:
             conn.execute(text("SET FOREIGN_KEY_CHECKS = 0;"))
-            # 기존 데이터를 지우지 않고 추가만 하고 싶을 때는 아래 3줄 앞에 # 을 붙여 비활성화
             conn.execute(text("TRUNCATE TABLE recipe_steps;"))
             conn.execute(text("TRUNCATE TABLE ingredients;"))
             conn.execute(text("TRUNCATE TABLE recipes;"))
