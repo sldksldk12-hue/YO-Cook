@@ -1,5 +1,30 @@
-venv/
-.env
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# Database files
+*.db
+*.sqlite3
+yocook.db
 data/
+
+# Environments & Secret Keys
+.env
+.env.*
+
+# IDE / Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
 activate_kclass.bat
+yocook.db
