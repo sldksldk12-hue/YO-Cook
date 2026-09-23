@@ -1,0 +1,16 @@
+# 필요 패키지
+fastapi
+uvicorn
+opencv-python
+ultralytics
+openai-whisper
+langchain
+langchain-openai
+sqlalchemy
+python-dotenv
+pymysql
+streamlit
+requests
+
+# 일괄 설치
+# pip install -r requirements.txt
