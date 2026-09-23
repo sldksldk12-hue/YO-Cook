@@ -2,36 +2,57 @@ import os
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from dotenv import load_dotenv  # 환경 변수 로드용 라이브러리 추가
+from dotenv import load_dotenv  
 
+# DB 연동을 위한 SQLAlchemy 세션 및 모델 임포트
+from app.models.database import SessionLocal
+from app.models.recipe import Recipe
+
+# 환경 변수 로드
 load_dotenv()
 
-def get_dummy_recipe_context() -> str:
+def get_real_recipe_context(recipe_id: int = 1) -> str:
     """
-    TODO: 추후 하석님이 완성할 MySQL DB 조회 로직으로 교체될 부분입니다.
-    현재는 ERD 구조(RECIPES, INGREDIENTS, RECIPE_STEPS)를 모방한 가상 데이터를 반환합니다.
+    MySQL 데이터베이스에서 실제 레시피, 식재료, 조리 단계 정보를 조회하여 
+    LLM이 분석할 수 있는 텍스트 형태(컨텍스트)로 변환합니다.
+    (현재는 연결 테스트를 위해 기본값 recipe_id=1을 사용합니다)
     """
-    return """
-    [요리명]: 백종원 초간단 김치볶음밥 (조리시간: 15분, 난이도: 초급, 1인분)
-    
-    [식재료]
-    - 필수: 밥 1공기, 신김치 1/2컵, 대파 1/2대, 식용유 2큰술, 간장 1/2큰술
-    - 선택: 계란 1개, 참기름 1큰술, 양파 1/4개 (대파 대체 가능)
-    
-    [조리 단계]
-    1단계: 대파를 송송 썰어 식용유를 두른 팬에 볶아 파기름을 냅니다. (타이머: 60초)
-    2단계: 파향이 올라오면 신김치를 넣고 함께 볶아줍니다. 
-    3단계: 간장을 팬 가장자리에 부어 불맛을 입힌 후, 밥을 넣고 골고루 볶습니다.
-    4단계: 완성된 볶음밥 위에 계란 프라이를 올리고 참기름을 두릅니다.
-    
-    [안전 주의사항]
-    - 기름이 튈 수 있으니 불을 중불로 조절하세요.
-    - 식칼 사용 시 손가락을 둥글게 말아 쥐세요.
-    """
+    db = SessionLocal()
+    try:
+        # 1. DB에서 레시피 정보(식재료, 단계 포함) 가져오기
+        recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+        
+        if not recipe:
+            return "요청하신 레시피 정보를 DB에서 찾을 수 없습니다."
+        
+        # 2. 식재료 데이터를 텍스트로 가공
+        essential_ing = [f"{ing.name} {ing.amount}" for ing in recipe.ingredients if ing.is_essential]
+        optional_ing = [f"{ing.name} {ing.amount}" for ing in recipe.ingredients if not ing.is_essential]
+        
+        ingredients_text = f"- 필수: {', '.join(essential_ing)}\n- 선택: {', '.join(optional_ing)}"
+        
+        # 3. 조리 단계 데이터를 텍스트로 가공
+        steps_text = "\n".join([f"{step.step_number}단계: {step.instruction}" for step in recipe.steps])
+        
+        # 4. 3가지 정보를 조합하여 최종 프롬프트 컨텍스트 생성
+        context = f"""
+        [요리명]: {recipe.title} (조리시간: {recipe.cooking_time_minutes}분, 난이도: {recipe.difficulty}, {recipe.servings})
+        
+        [식재료]
+        {ingredients_text}
+        
+        [조리 단계]
+        {steps_text}
+        """
+        return context
+    finally:
+        db.close()
 
 def generate_recipe_answer(user_question: str, intent: str) -> str:
     """사용자의 질문과 분류된 의도를 바탕으로 컨텍스트를 분석하여 최적의 답변을 생성합니다."""
-    context = get_dummy_recipe_context()
+    
+    # 더미 데이터 함수 대신 실제 DB 조회 함수로 교체
+    context = get_real_recipe_context(recipe_id=1) 
     
     llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.1)
     
