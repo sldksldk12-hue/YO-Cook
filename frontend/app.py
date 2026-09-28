@@ -1,5 +1,13 @@
 import streamlit as st
 import requests
+import importlib
+import api_client
+import recipe_viewer
+
+# 모듈 수정사항 실시간 즉시 반영 (Streamlit 모듈 캐싱 방지)
+importlib.reload(api_client)
+importlib.reload(recipe_viewer)
+
 from recipe_viewer import render_recipe_viewer
 
 # 페이지 기본 설정
