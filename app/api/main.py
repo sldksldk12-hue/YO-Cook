@@ -1,7 +1,7 @@
 # uvicorn app.main:app --reload
 
 from fastapi import FastAPI
-from app.api import nlp, vision, websocket
+from app.api import recipes, nlp, vision, websocket
 
 app = FastAPI(
     title="YO-Cook AI Cooking Mate",
@@ -10,6 +10,7 @@ app = FastAPI(
 )
 
 # REST API 라우터 등록
+app.include_router(recipes.router, prefix="/api/recipes", tags=["Recipes"])
 app.include_router(nlp.router, prefix="/api/nlp", tags=["NLP"])
 app.include_router(vision.router, prefix="/api/vision", tags=["Vision"])
 

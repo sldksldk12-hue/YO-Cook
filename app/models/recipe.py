@@ -8,9 +8,7 @@ if TYPE_CHECKING:
     from app.models.user import UserFavorite
     from app.models.session import CookingSession
 
-# ==========================================
 # 1. RECIPES (레시피 마스터 정보)
-# ==========================================
 class Recipe(Base):
     __tablename__ = "recipes"
 
@@ -43,9 +41,7 @@ class Recipe(Base):
     )
 
 
-# ==========================================
 # 2. INGREDIENTS (레시피 식재료)
-# ==========================================
 class Ingredient(Base):
     __tablename__ = "ingredients"
 
@@ -61,9 +57,7 @@ class Ingredient(Base):
     recipe: Mapped["Recipe"] = relationship("Recipe", back_populates="ingredients")
 
 
-# ==========================================
 # 3. RECIPE_STEPS (조리 단계 및 안전 가이드)
-# ==========================================
 class RecipeStep(Base):
     __tablename__ = "recipe_steps"
 

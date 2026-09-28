@@ -235,19 +235,63 @@ def crawl_and_seed_recipes(target_count: int = 20):
 
                 step_num = 1
                 for s_item in step_items:
-                    # 지침 텍스트
-                    instruction = s_item.get_text(" ", strip=True)
+                    # 도구 및 팁 전용 태그 분리 및 추출 (지침 본문 오염 방지)
+                    site_tools = []
+                    site_tips = []
+                    
+                    media_body = s_item.select_one("div.media-body") or s_item
+
+                    for tool_p in media_body.select("p.step_add.add_tool, p.add_tool"):
+                        tool_text = tool_p.get_text(strip=True)
+                        if tool_text:
+                            # '도마.빵칼' 같은 형태 분리
+                            for t in tool_text.replace(".", ",").split(","):
+                                if t.strip():
+                                    site_tools.append(t.strip())
+                        tool_p.decompose()
+
+                    for tip_p in media_body.select("p.step_add.add_tip, p.add_tip, div.add_tip"):
+                        tip_text = tip_p.get_text(strip=True)
+                        if tip_text:
+                            site_tips.append(tip_text)
+                        tip_p.decompose()
+
+                    for any_add in media_body.select("p.step_add"):
+                        any_add.decompose()
+
+                    # 순수 조리 지침 텍스트
+                    instruction = " ".join(media_body.stripped_strings)
                     if not instruction or len(instruction) < 3:
                         continue
 
-                    # 타이머 및 안전팁 추출
+                    # 타이머 및 안전 주의사항 / 필요 도구 자동 태깅
                     timer_seconds = parse_timer_seconds(instruction)
-                    safety_warning, required_tools = detect_safety_warning_and_tools(instruction)
+                    safety_warning, detected_tools = detect_safety_warning_and_tools(instruction)
 
-                    # 단계 사진
-                    parent = s_item.find_parent("div", class_="view_step")
-                    step_img_tag = parent.find("img") if parent else None
-                    step_img_url = step_img_tag["src"] if step_img_tag and step_img_tag.get("src") else None
+                    # 사이트 기재 도구 + 자동 검출 도구 통합
+                    all_tools = []
+                    if detected_tools:
+                        all_tools.extend([t.strip() for t in detected_tools.split(",")])
+                    all_tools.extend(site_tools)
+                    all_tools_str = ", ".join(list(dict.fromkeys(all_tools))) if all_tools else None
+                    tip_str = "\n".join(site_tips) if site_tips else None
+
+                    # 단계별 고유 조리 사진 추출 (#stepimg{step_num} 및 s_item 내부 img)
+                    img_tag = s_item.select_one("img")
+                    if not img_tag:
+                        step_div = detail_soup.select_one(f"#stepimg{step_num}")
+                        if step_div:
+                            img_tag = step_div.select_one("img")
+                    if not img_tag:
+                        sibling = s_item.find_next_sibling("div")
+                        if sibling and "stepimg" in sibling.get("id", ""):
+                            img_tag = sibling.select_one("img")
+
+                    step_img_url = None
+                    if img_tag and img_tag.get("src"):
+                        src = img_tag["src"]
+                        if "tab_" not in src and "mobile" not in src:
+                            step_img_url = src
 
                     recipe_step = RecipeStep(
                         recipe_id=recipe.id,
@@ -255,8 +299,9 @@ def crawl_and_seed_recipes(target_count: int = 20):
                         instruction=instruction,
                         timer_seconds=timer_seconds,
                         image_url=step_img_url,
+                        tip=tip_str,
                         safety_warning=safety_warning,
-                        required_tools=required_tools
+                        required_tools=all_tools_str
                     )
                     db.add(recipe_step)
                     step_num += 1

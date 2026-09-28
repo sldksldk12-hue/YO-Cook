@@ -1,1 +1,1 @@
-call D:\KDT2604\.venv\Scripts/activate.batgit rm --cached .env
+call D:\KDT2604\.venv\Scripts\activate.bat

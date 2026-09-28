@@ -8,9 +8,7 @@ if TYPE_CHECKING:
     from app.models.user import User
     from app.models.recipe import Recipe
 
-# ==========================================
 # 1. COOKING_SESSIONS (실시간 조리 세션)
-# ==========================================
 class CookingSession(Base):
     """
     사용자가 '요리 시작하기'를 눌렀을 때 생성되는 1회 조리 진행 세션
@@ -37,9 +35,7 @@ class CookingSession(Base):
     )
 
 
-# ==========================================
 # 2. SAFETY_LOGS (비전 안전 경고 이력)
-# ==========================================
 class SafetyLog(Base):
     """
     비전 AI가 조리 도중 감지한 위험 상황(칼질 근접, 열원 방치 등)의 발생 이력
