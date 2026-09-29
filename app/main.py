@@ -1,12 +1,22 @@
 # uvicorn app.main:app --reload
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from app.api import recipes, sessions, favorites, nlp, vision, websocket
 
 app = FastAPI(
     title="YO-Cook AI Cooking Mate",
     description="음성 명령 인식 및 비전 탐지를 위한 백엔드 서버",
     version="1.0.0"
+)
+
+# CORS 미들웨어 등록 (모바일 기기, 외부 IP, 모든 프론트엔드 출처 통신 허용)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # REST API 라우터 등록

@@ -16,8 +16,14 @@ MYSQL_DB = os.getenv("MYSQL_DB", "yocook_db")
 SQLALCHEMY_DATABASE_URL = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}"
 
 # DB 엔진 및 세션 생성
-# echo=True를 설정하면 서버 콘솔에서 실행되는 실제 SQL 쿼리를 확인할 수 있습니다.
-engine = create_engine(SQLALCHEMY_DATABASE_URL, echo=True) 
+# pool_pre_ping=True: 장시간 유휴 후 연결 끊김 자동 재연결
+# pool_recycle=3600: 1시간마다 커넥션 자동 갱신
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    echo=True,
+    pool_pre_ping=True,
+    pool_recycle=3600
+) 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
