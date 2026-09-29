@@ -1,12 +1,14 @@
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, UploadFile, File, Form
 import whisper
 import os
 import shutil
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from dotenv import load_dotenv  # 환경 변수 로드용 라이브러리 추가
-from app.services.rag import generate_recipe_answer
+from dotenv import load_dotenv
+
+# 기존 함수 대신 세션을 인식하는 새로운 RAG 함수 불러오기
+from app.services.rag import generate_session_aware_answer
 
 load_dotenv()
 
@@ -35,25 +37,33 @@ def classify_user_intent(user_text: str) -> str:
     return chain.invoke({"text": user_text})
 
 @router.post("/process-audio")
-async def process_audio(file: UploadFile = File(...)):
-    """클라이언트로부터 오디오 파일을 받아 STT, 의도 분석, 그리고 최종 답변(RAG)을 반환합니다."""
+async def process_audio(
+    file: UploadFile = File(...),
+    session_code: str = Form(...)  # 클라이언트로부터 세션 방 번호 받기
+):
+    """클라이언트로부터 오디오 파일을 받아 STT, 의도 분석, 그리고 세션 맞춤형 최종 답변(RAG)을 반환합니다."""
     temp_file_path = f"temp_{file.filename}"
     
     with open(temp_file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
     try:
+        # 1. 음성 인식 (STT)
         result = whisper_model.transcribe(temp_file_path, language="ko")
         recognized_text = result["text"].strip()
         
+        # 2. 의도 분류
         intent = classify_user_intent(recognized_text)
-        final_answer = generate_recipe_answer(recognized_text, intent)
+        
+        # 3. 세션 정보와 함께 RAG 파이프라인 호출
+        rag_result = generate_session_aware_answer(recognized_text, intent, session_code)
         
         return {
             "status": "success",
             "recognized_text": recognized_text,
             "intent": intent,
-            "ai_response": final_answer
+            "current_step": rag_result["current_step"], # 현재 조리 단계 반환
+            "ai_response": rag_result["answer"]         # AI의 안내 답변 반환
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}

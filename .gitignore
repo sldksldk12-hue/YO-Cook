@@ -12,7 +12,7 @@ env/
 yocook.db
 data/
 
-# Environments & Secret Keys
+# Environments & Secret Keys                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
 .env
 .env.*
 
