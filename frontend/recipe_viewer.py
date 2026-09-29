@@ -6,7 +6,10 @@ from api_client import (
     start_session,
     get_session_detail,
     update_session_step,
-    complete_session
+    complete_session,
+    toggle_favorite,
+    get_favorite_status,
+    get_user_favorites
 )
 
 def render_recipe_viewer() -> Optional[int]:
@@ -93,13 +96,17 @@ def render_recipe_viewer() -> Optional[int]:
         
         with btn_col1:
             if st.button("⬅️ 이전 단계", disabled=(current_step <= 1), use_container_width=True):
-                update_session_step(session_id, action="PREV")
+                res = update_session_step(session_id, action="PREV")
+                if res and "current_step" in res:
+                    st.session_state.current_step = res["current_step"]
                 st.rerun()
 
         with btn_col2:
             if current_step < total_steps:
                 if st.button("➡️ 다음 단계", type="primary", use_container_width=True):
-                    update_session_step(session_id, action="NEXT")
+                    res = update_session_step(session_id, action="NEXT")
+                    if res and "current_step" in res:
+                        st.session_state.current_step = res["current_step"]
                     st.rerun()
             else:
                 st.write("")
@@ -122,20 +129,34 @@ def render_recipe_viewer() -> Optional[int]:
 
     # [모드 3] 레시피 검색 및 탐색 모드 (요리 시작 전)
     # 1. 검색 및 필터 UI
-    col_search, col_diff = st.columns([2, 1])
+    col_search, col_diff, col_fav = st.columns([2, 1, 1])
     with col_search:
         keyword = st.text_input("🔍 레시피 검색", placeholder="예: 김치, 계란, 파스타...")
     with col_diff:
         difficulty = st.selectbox("난이도", ["전체", "초급", "중급", "고급"])
+    with col_fav:
+        st.write("")
+        st.write("")
+        only_favorites = st.checkbox("❤️ 찜한 요리만", key="filter_only_favorites")
 
     # 2. 백엔드에서 레시피 목록 가져오기
-    recipes = get_recipes(
-        keyword=keyword if keyword else None,
-        difficulty=difficulty if difficulty != "전체" else None
-    )
+    if only_favorites:
+        raw_favs = get_user_favorites(user_id=1)
+        recipes = raw_favs
+        if keyword:
+            kw = keyword.strip().lower()
+            recipes = [r for r in recipes if kw in r['title'].lower() or kw in (r.get('tags') or '').lower()]
+        if difficulty and difficulty != "전체":
+            recipes = [r for r in recipes if r['difficulty'] == difficulty]
+    else:
+        recipes = get_recipes(
+            keyword=keyword if keyword else None,
+            difficulty=difficulty if difficulty != "전체" else None
+        )
 
     if not recipes:
-        st.warning("조건에 맞는 레시피가 없습니다. 백엔드 서버가 실행 중인지 확인해주세요.")
+        msg = "찜한 레시피가 아직 없습니다. 마음에 드는 요리에 ❤️ 찜하기를 눌러보세요!" if only_favorites else "조건에 맞는 레시피가 없습니다. 백엔드 서버가 실행 중인지 확인해주세요."
+        st.warning(msg)
         return None
 
     # 3. 레시피 선택 드롭다운
@@ -168,7 +189,19 @@ def render_recipe_viewer() -> Optional[int]:
             st.image("https://via.placeholder.com/230x160?text=YO-Cook+Recipe", width=230)
             
     with col_info2:
-        st.markdown(f"### {detail['title']}")
+        # 제목 및 찜하기 토글 버튼
+        col_t1, col_t2 = st.columns([3, 1.2])
+        with col_t1:
+            st.markdown(f"### {detail['title']}")
+        with col_t2:
+            fav_info = get_favorite_status(selected_recipe_id, user_id=1)
+            is_fav = fav_info.get("is_favorited", False)
+            fav_cnt = fav_info.get("total_favorites_count", 0)
+            fav_btn_text = f"❤️ 찜 완료 ({fav_cnt})" if is_fav else f"🤍 찜하기 ({fav_cnt})"
+            if st.button(fav_btn_text, key=f"fav_btn_{selected_recipe_id}", use_container_width=True):
+                res = toggle_favorite(selected_recipe_id, user_id=1)
+                st.rerun()
+
         if detail.get("description"):
             st.caption(f"📝 {detail['description']}")
             
@@ -186,6 +219,8 @@ def render_recipe_viewer() -> Optional[int]:
         new_session = start_session(selected_recipe_id)
         if new_session:
             st.session_state.active_session_id = new_session["id"]
+            st.session_state.session_code = new_session["session_code"]
+            st.session_state.current_step = 1
             st.rerun()
 
     st.markdown("---")

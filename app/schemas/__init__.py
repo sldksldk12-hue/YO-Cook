@@ -13,6 +13,12 @@ from app.schemas.session import (
     StepUpdateRequest,
     SessionCompleteResponse
 )
+from app.schemas.favorite import (
+    FavoriteToggleRequest,
+    FavoriteToggleResponse,
+    FavoriteStatusResponse,
+    UserFavoritesListResponse
+)
 
 __all__ = [
     "IngredientResponse",
@@ -25,5 +31,9 @@ __all__ = [
     "SessionResponse",
     "SessionDetailResponse",
     "StepUpdateRequest",
-    "SessionCompleteResponse"
+    "SessionCompleteResponse",
+    "FavoriteToggleRequest",
+    "FavoriteToggleResponse",
+    "FavoriteStatusResponse",
+    "UserFavoritesListResponse"
 ]

@@ -123,3 +123,44 @@ def complete_session(session_id: int) -> Optional[Dict[str, Any]]:
     except requests.exceptions.RequestException as e:
         print(f"[API Error] 세션 완료 처리 실패 (ID {session_id}): {e}")
         return None
+
+
+# 3. 레시피 찜하기(즐겨찾기) 관련 API 클라이언트
+def toggle_favorite(recipe_id: int, user_id: int = 1) -> Optional[Dict[str, Any]]:
+    """레시피 찜하기/찜취소 토글 요청을 전송합니다."""
+    payload = {"user_id": user_id}
+    try:
+        response = requests.post(f"{API_BASE_URL}/api/favorites/recipes/{recipe_id}/favorite", json=payload, timeout=5)
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"[API Error] 찜하기 토글 실패 (레시피 {recipe_id}): {e}")
+        return None
+
+def get_favorite_status(recipe_id: int, user_id: int = 1) -> Dict[str, Any]:
+    """해당 레시피의 찜 여부 및 총 찜 수를 조회합니다."""
+    try:
+        response = requests.get(
+            f"{API_BASE_URL}/api/favorites/recipes/{recipe_id}/favorite-status",
+            params={"user_id": user_id},
+            timeout=5
+        )
+        if response.status_code == 200:
+            return response.json()
+        return {"is_favorited": False, "total_favorites_count": 0}
+    except requests.exceptions.RequestException as e:
+        print(f"[API Error] 찜 상태 조회 실패 (레시피 {recipe_id}): {e}")
+        return {"is_favorited": False, "total_favorites_count": 0}
+
+def get_user_favorites(user_id: int = 1) -> List[Dict[str, Any]]:
+    """사용자가 찜한 레시피 목록을 조회합니다."""
+    try:
+        response = requests.get(f"{API_BASE_URL}/api/favorites/users/{user_id}/favorites", timeout=5)
+        if response.status_code == 200:
+            return response.json().get("recipes", [])
+        return []
+    except requests.exceptions.RequestException as e:
+        print(f"[API Error] 찜 목록 조회 실패: {e}")
+        return []
+
