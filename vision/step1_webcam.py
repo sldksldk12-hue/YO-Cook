@@ -1,5 +1,6 @@
 # 비전 1단계: 웹캠 + FPS 표시
 # 모든 실시간 비전 코드는 열기 -> (읽기 -> 처리 -> 보여주기) 반복 -> 닫기 구조를 따름
+# 1단계: 열기 → (읽기 → [FPS] → 보여주기) 반복 → 닫기
 
 import cv2
 import time
@@ -19,7 +20,7 @@ while True:
         print(frame.shape)
         printed = True       # 한번만 출력하기위해 True 바꿔 출력 x
 
-        
+
     # ③ frame 처리 (탐지, 그리기 등)
 
     # FPS = 1 / (한 바퀴 걸린 시간)
