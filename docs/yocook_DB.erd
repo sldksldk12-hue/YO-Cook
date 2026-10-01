@@ -6,9 +6,9 @@
     "height": 2000,
     "scrollTop": 0,
     "scrollLeft": 0,
-    "originX": 113.4087,
-    "originY": -24.9996,
-    "zoomLevel": 0.76,
+    "originX": -143.1798,
+    "originY": -62.4733,
+    "zoomLevel": 0.73,
     "show": 511,
     "database": 4,
     "databaseName": "",
@@ -258,6 +258,7 @@
           "pGw00hk4oGA6qg9a9UOw0",
           "1_6lGOYCdgFjK4_2aYREj",
           "Ua9VFi0306eFNK2kfITUl",
+          "2-D06yp-cxg2RgqRqCVnE",
           "dl2H5EmYdjRv_XwSgKj_r",
           "3PehO9mghGWK4bhI_VFd6"
         ],
@@ -268,6 +269,7 @@
           "pGw00hk4oGA6qg9a9UOw0",
           "1_6lGOYCdgFjK4_2aYREj",
           "Ua9VFi0306eFNK2kfITUl",
+          "2-D06yp-cxg2RgqRqCVnE",
           "dl2H5EmYdjRv_XwSgKj_r",
           "3PehO9mghGWK4bhI_VFd6",
           "j7FG0iKs3A5kG_ieULBFa",
@@ -284,7 +286,7 @@
           "color": "#2196F3"
         },
         "meta": {
-          "updateAt": 1790828215034,
+          "updateAt": 1790832489581,
           "createAt": 1790054896433
         }
       },
@@ -1314,7 +1316,7 @@
         "tableId": "g6pxAzN8uSlJdPfPp7dmK",
         "name": "current_step",
         "comment": "현재 진행 중인 단계",
-        "dataType": "",
+        "dataType": "INTEGER",
         "default": "1",
         "options": 8,
         "ui": {
@@ -1325,7 +1327,7 @@
           "widthDefault": 60
         },
         "meta": {
-          "updateAt": 1790055389178,
+          "updateAt": 1790832554771,
           "createAt": 1790054909905
         }
       },
@@ -1334,7 +1336,7 @@
         "tableId": "g6pxAzN8uSlJdPfPp7dmK",
         "name": "is_completed",
         "comment": "조리 완료 여부",
-        "dataType": "",
+        "dataType": "BOOLEAN",
         "default": "False",
         "options": 8,
         "ui": {
@@ -1345,7 +1347,7 @@
           "widthDefault": 60
         },
         "meta": {
-          "updateAt": 1790055403768,
+          "updateAt": 1790832557914,
           "createAt": 1790054910064
         }
       },
@@ -1354,7 +1356,7 @@
         "tableId": "g6pxAzN8uSlJdPfPp7dmK",
         "name": "started_at",
         "comment": "세션 시작 시간",
-        "dataType": "",
+        "dataType": "DATETIME",
         "default": "now()",
         "options": 8,
         "ui": {
@@ -1365,7 +1367,7 @@
           "widthDefault": 60
         },
         "meta": {
-          "updateAt": 1790055409083,
+          "updateAt": 1790832569666,
           "createAt": 1790054910241
         }
       },
@@ -1374,7 +1376,7 @@
         "tableId": "g6pxAzN8uSlJdPfPp7dmK",
         "name": "ended_at",
         "comment": "세션 종료 시간",
-        "dataType": "",
+        "dataType": "DATETIME",
         "default": "",
         "options": 0,
         "ui": {
@@ -1385,7 +1387,7 @@
           "widthDefault": 60
         },
         "meta": {
-          "updateAt": 1790055419660,
+          "updateAt": 1790832571986,
           "createAt": 1790054910409
         }
       },
@@ -1728,6 +1730,26 @@
           "updateAt": 1790828072706,
           "createAt": 1790828029146
         }
+      },
+      "2-D06yp-cxg2RgqRqCVnE": {
+        "id": "2-D06yp-cxg2RgqRqCVnE",
+        "tableId": "g6pxAzN8uSlJdPfPp7dmK",
+        "name": "calibration_status",
+        "comment": "카메라 구도 세팅 상태",
+        "dataType": "VARCHAR(30)",
+        "default": "VERIFIED",
+        "options": 8,
+        "ui": {
+          "keys": 0,
+          "widthName": 94,
+          "widthComment": 120,
+          "widthDataType": 75,
+          "widthDefault": 60
+        },
+        "meta": {
+          "updateAt": 1790832566146,
+          "createAt": 1790832487859
+        }
       }
     },
     "relationshipEntities": {
@@ -1862,7 +1884,7 @@
           "columnIds": [
             "ZL6VbOMrtoISaFrj2aLvu"
           ],
-          "x": 696.4200000000001,
+          "x": 707.4200000000001,
           "y": 427.8989,
           "direction": 4
         },
@@ -1891,7 +1913,7 @@
             "pGw00hk4oGA6qg9a9UOw0"
           ],
           "x": 417.92,
-          "y": 538.8989,
+          "y": 550.8989,
           "direction": 1
         },
         "meta": {
@@ -1909,8 +1931,8 @@
           "columnIds": [
             "BHzsNh8Gxe6eZMzRPaSZA"
           ],
-          "x": 974.9200000000001,
-          "y": 538.8989,
+          "x": 996.9200000000001,
+          "y": 550.8989,
           "direction": 2
         },
         "end": {

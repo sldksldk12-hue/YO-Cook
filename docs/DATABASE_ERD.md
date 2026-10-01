@@ -78,6 +78,7 @@ erDiagram
         int recipe_id FK "레시피 ID"
         int current_step "현재 진행 단계"
         boolean is_completed "완료 여부"
+        string calibration_status "카메라 구도 세팅 상태 (VERIFIED/SKIPPED)"
         datetime started_at "시작일시"
         datetime ended_at "종료일시"
     }
@@ -168,6 +169,7 @@ erDiagram
 | **`recipe_id`** | INTEGER | FK (recipes.id), NOT NULL | - | 조리 중인 레시피 ID |
 | **`current_step`** | INTEGER | NOT NULL | 1 | 현재 진행 중인 단계 |
 | **`is_completed`** | BOOLEAN | NOT NULL | False | 조리 완료 여부 |
+| **`calibration_status`** | VARCHAR(30) | NOT NULL | 'VERIFIED' | **카메라 구도 설정 방식** (`VERIFIED`: 도구 감지 완료, `SKIPPED`: 건너뛰기) |
 | **`started_at`** | DATETIME | NOT NULL | now() | 세션 시작 시간 |
 | **`ended_at`** | DATETIME | NULL | - | 세션 종료 시간 |
 

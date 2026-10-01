@@ -45,12 +45,14 @@ def start_cooking_session(
     session_code = f"COOK-{uuid.uuid4().hex[:8].upper()}"
 
     # 3. CookingSession 레코드 생성
+    calibration_status = payload.calibration_status if payload.calibration_status else "VERIFIED"
     new_session = CookingSession(
         session_code=session_code,
         user_id=payload.user_id,
         recipe_id=payload.recipe_id,
         current_step=1,
         is_completed=False,
+        calibration_status=calibration_status,
         started_at=datetime.utcnow()
     )
     db.add(new_session)
@@ -68,6 +70,7 @@ def start_cooking_session(
         current_step=new_session.current_step,
         total_steps=total_steps,
         is_completed=new_session.is_completed,
+        calibration_status=new_session.calibration_status,
         started_at=new_session.started_at,
         ended_at=new_session.ended_at
     )
@@ -113,6 +116,7 @@ def get_session_detail(
         current_step=session.current_step,
         total_steps=total_steps,
         is_completed=session.is_completed,
+        calibration_status=session.calibration_status,
         started_at=session.started_at,
         ended_at=session.ended_at,
         current_step_detail=step_detail,
@@ -173,6 +177,7 @@ def update_session_step(
         current_step=session.current_step,
         total_steps=total_steps,
         is_completed=session.is_completed,
+        calibration_status=session.calibration_status,
         started_at=session.started_at,
         ended_at=session.ended_at,
         current_step_detail=step_detail,

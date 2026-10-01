@@ -31,6 +31,7 @@ class SafetyLogResponse(BaseModel):
 class SessionStartRequest(BaseModel):
     recipe_id: int = Field(..., description="요리를 시작할 레시피 ID")
     user_id: Optional[int] = Field(None, description="사용자 ID (비회원은 생략 가능)")
+    calibration_status: Optional[str] = Field("VERIFIED", description="카메라 구도 세팅 방식 ('VERIFIED': 정상감지, 'SKIPPED': 건너뛰기)")
 
 class SessionResponse(BaseModel):
     id: int
@@ -41,6 +42,7 @@ class SessionResponse(BaseModel):
     current_step: int
     total_steps: int
     is_completed: bool
+    calibration_status: str
     started_at: datetime
     ended_at: Optional[datetime] = None
 

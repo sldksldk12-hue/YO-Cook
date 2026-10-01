@@ -22,6 +22,7 @@ class CookingSession(Base):
     recipe_id: Mapped[int] = mapped_column(ForeignKey("recipes.id", ondelete="CASCADE"), nullable=False, index=True)       # 진행 중인 레시피 ID
     current_step: Mapped[int] = mapped_column(Integer, default=1, nullable=False)                   # 현재 진행 단계 (1단계, 2단계...)
     is_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)              # 조리 완료 여부
+    calibration_status: Mapped[str] = mapped_column(String(30), default="VERIFIED", nullable=False) # 카메라 구도 세팅 상태 (VERIFIED: 정상감지, SKIPPED: 건너뛰기)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False) # 시작 일시
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)                  # 종료 일시
 
