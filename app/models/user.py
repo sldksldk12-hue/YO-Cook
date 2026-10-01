@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List, Optional, TYPE_CHECKING
-from sqlalchemy import String, Integer, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.database import Base
 
@@ -14,6 +14,8 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False) # 로그인 아이디
     nickname: Mapped[str] = mapped_column(String(50), nullable=False)                          # 닉네임
+    wake_word_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)      # 호출어 인식 활성화 여부 (ON/OFF)
+    wake_word: Mapped[str] = mapped_column(String(50), default="요쿡아", nullable=False)        # 사용자 지정 호출어
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     # 1:N 관계 매핑

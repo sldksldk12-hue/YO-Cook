@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import recipes, sessions, favorites, nlp, vision, websocket
+from app.api import recipes, sessions, favorites, users, nlp, vision, websocket
 
 app = FastAPI(
     title="YO-Cook AI Cooking Mate",
@@ -23,6 +23,7 @@ app.add_middleware(
 app.include_router(recipes.router, prefix="/api/recipes", tags=["Recipes"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["Sessions"])
 app.include_router(favorites.router, prefix="/api/favorites", tags=["Favorites"])
+app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(nlp.router, prefix="/api/nlp", tags=["NLP"])
 app.include_router(vision.router, prefix="/api/vision", tags=["Vision"])
 

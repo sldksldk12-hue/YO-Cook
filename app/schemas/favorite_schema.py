@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, Field, ConfigDict
-from app.schemas.recipe import RecipeSummaryResponse
+from app.schemas.recipe_schema import RecipeSummaryResponse
 
 # 1. 찜하기 토글 요청 및 응답 스키마
 class FavoriteToggleRequest(BaseModel):

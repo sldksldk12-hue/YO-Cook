@@ -2,15 +2,16 @@ import uuid
 from datetime import datetime
 from typing import Optional, List, Literal
 from pydantic import BaseModel, Field, ConfigDict
-from app.schemas.recipe import RecipeStepResponse
+from app.schemas.recipe_schema import RecipeStepResponse
 
 # 1. 안전 경고 로그 스키마 (SafetyLog)
 class SafetyLogCreate(BaseModel):
     step_number: int = Field(..., description="위험이 감지된 조리 단계")
-    hazard_type: str = Field(..., description="위험 유형 (예: KNIFE_PROXIMITY, HEAT_ABSENCE, OIL_SPLASH)")
+    hazard_type: str = Field(..., description="위험 유형 (예: UNATTENDED, KNIFE_PROXIMITY, HEAT_ABSENCE, OIL_SPLASH)")
     level: Literal["INFO", "WARNING", "DANGER"] = Field("WARNING", description="위험 등급")
     message: str = Field(..., description="사용자 경고 문구")
-    distance_px: Optional[float] = Field(None, description="손-칼날 간 거리 (픽셀)")
+    distance_px: Optional[float] = Field(None, description="손-칼날 간 거리 (픽셀, 칼 위험 시)")
+    duration_seconds: Optional[int] = Field(None, description="자리 비움 / 위험 지속 시간 (초)")
 
 class SafetyLogResponse(BaseModel):
     id: int
@@ -20,6 +21,7 @@ class SafetyLogResponse(BaseModel):
     level: str
     message: str
     distance_px: Optional[float] = None
+    duration_seconds: Optional[int] = None
     detected_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

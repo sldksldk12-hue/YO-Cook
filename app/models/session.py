@@ -50,6 +50,7 @@ class SafetyLog(Base):
     level: Mapped[str] = mapped_column(String(20), default="WARNING", nullable=False) # 위험 등급 (INFO, WARNING, DANGER)
     message: Mapped[str] = mapped_column(String(255), nullable=False)         # 사용자에게 전달된 경고 문구
     distance_px: Mapped[Optional[float]] = mapped_column(Float, nullable=True) # 손-칼날 간 거리 (px)
+    duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True) # 위험/자리 비움 지속 시간 (초)
     detected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False) # 감지 일시
 
     # N:1 부모 세션 관계
