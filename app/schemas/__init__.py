@@ -1,10 +1,10 @@
-from app.schemas.recipe import (
+from app.schemas.recipe_schema import (
     IngredientResponse,
     RecipeStepResponse,
     RecipeSummaryResponse,
     RecipeDetailResponse
 )
-from app.schemas.session import (
+from app.schemas.session_schema import (
     SafetyLogCreate,
     SafetyLogResponse,
     SessionStartRequest,
@@ -13,11 +13,16 @@ from app.schemas.session import (
     StepUpdateRequest,
     SessionCompleteResponse
 )
-from app.schemas.favorite import (
+from app.schemas.favorite_schema import (
     FavoriteToggleRequest,
     FavoriteToggleResponse,
     FavoriteStatusResponse,
     UserFavoritesListResponse
+)
+from app.schemas.user_schema import (
+    UserSettingsUpdate,
+    UserSettingsResponse,
+    UserResponse
 )
 
 __all__ = [
@@ -35,5 +40,8 @@ __all__ = [
     "FavoriteToggleRequest",
     "FavoriteToggleResponse",
     "FavoriteStatusResponse",
-    "UserFavoritesListResponse"
+    "UserFavoritesListResponse",
+    "UserSettingsUpdate",
+    "UserSettingsResponse",
+    "UserResponse"
 ]

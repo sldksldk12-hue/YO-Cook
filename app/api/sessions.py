@@ -8,7 +8,7 @@ from sqlalchemy import select
 from app.models.database import get_db
 from app.models.recipe import Recipe, RecipeStep
 from app.models.session import CookingSession, SafetyLog
-from app.schemas.session import (
+from app.schemas.session_schema import (
     SessionStartRequest,
     SessionResponse,
     SessionDetailResponse,
@@ -17,7 +17,7 @@ from app.schemas.session import (
     SafetyLogResponse,
     SessionCompleteResponse
 )
-from app.schemas.recipe import RecipeStepResponse
+from app.schemas.recipe_schema import RecipeStepResponse
 
 router = APIRouter()
 
@@ -207,6 +207,7 @@ def record_safety_log(
         level=payload.level,
         message=payload.message,
         distance_px=payload.distance_px,
+        duration_seconds=payload.duration_seconds,
         detected_at=datetime.utcnow()
     )
     db.add(log)

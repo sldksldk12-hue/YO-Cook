@@ -6,13 +6,13 @@ from sqlalchemy import select, func
 from app.models.database import get_db
 from app.models.recipe import Recipe
 from app.models.user import User, UserFavorite
-from app.schemas.favorite import (
+from app.schemas.favorite_schema import (
     FavoriteToggleRequest,
     FavoriteToggleResponse,
     FavoriteStatusResponse,
     UserFavoritesListResponse
 )
-from app.schemas.recipe import RecipeSummaryResponse
+from app.schemas.recipe_schema import RecipeSummaryResponse
 
 router = APIRouter()
 
