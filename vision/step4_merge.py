@@ -1,14 +1,17 @@
-# 비전 4단계: YOLO + MediaPipe
+# 비전 4단계: YOLO + MediaPipe + 폰 영상 입력
 
 
 import cv2
 import time
+import urllib.request
+import numpy as np
 import mediapipe as mp
+import torch
 from ultralytics import YOLO
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from pathlib import Path
-import torch
+
 torch.set_num_threads(2)  # MediaPipe와 CPU 다툼 줄이기 (18/8/4/2 비교 → 2가 가장 빠름)
 
 # 모델을 vision파일 밖에서도 찾을수 있게하는 설정
@@ -30,10 +33,10 @@ landmarker = vision.HandLandmarker.create_from_options(options)
 model = YOLO("yolov8n.pt")      # 모델은 루프 밖에서 한 번만 (처음 실행 시 자동 다운로드)
 
 
-# ★ 처리 함수: 프레임을 받아서 탐지 + 그리기 → 그림을 돌려줌
+# 처리 함수: 프레임을 받아서 탐지 + 그리기 → 그림을 돌려줌
 #   입력(웹캠/폰)이나 출력(imshow/JSON)이 바뀌어도 이 함수는 그대로
 def process(frame, timestamp_ms):
-    # YOLO 탐지 (★ 루프에서 옮겨옴)
+    # YOLO 탐지
     results = model(frame, conf=0.4, imgsz=320, verbose=False)
     annotated = results[0].plot()   # 박스가 그려진 새 이미지 (원본 frame은 그대로)
 
@@ -52,34 +55,45 @@ def process(frame, timestamp_ms):
     return annotated
 
 
-cap = cv2.VideoCapture(0)
+# ★ 영상 입력: 폰(IP Webcam)에서 최신 사진 한 장씩 받아오기
+#   /video(계속 흐르는 영상)는 버퍼가 쌓여 점점 늦어져서 /shot.jpg 사용
+# SOURCE = "http://192.168.0.212:8080/video"   # 비교용 (버퍼 지연 있음)
+SHOT_URL = "http://192.168.0.212:8080/shot.jpg"
+
+def read_phone():
+    data = urllib.request.urlopen(SHOT_URL, timeout=2).read()   # 사진 한 장 받기 (bytes)
+    return cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)  # bytes → 이미지
+
+
 printed = False
 start = time.perf_counter()
 prev = start
 last_ts = -1
 
 while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+    # ★ 웹캠 cap.read() 대신 폰에서 받기
+    frame = read_phone()
+    if frame is None:       # 사진이 깨져서 못 읽으면 이번 프레임은 건너뜀
+        continue
+    # frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)   # 앱에서 방향 못 바꿀 때만 사용
 
     if not printed:
         print(frame.shape)
         printed = True
 
-    # FPS 계산 (★ 함수에서 꺼내옴)
+    # FPS 계산
     now = time.perf_counter()
     dt = now - prev
     fps = 1 / dt if dt > 0 else 0       # 0으로 나누기 방지
     prev = now
 
-    # timestamp: 항상 이전 값보다 크게 (★ 함수에서 꺼내옴)
+    # timestamp: 항상 이전 값보다 크게
     timestamp_ms = int((now - start) * 1000)
     if timestamp_ms <= last_ts:
         timestamp_ms = last_ts + 1
     last_ts = timestamp_ms
 
-    # ★ 탐지 + 그리기는 함수 한 줄로
+    # 탐지 + 그리기는 함수 한 줄로
     annotated = process(frame, timestamp_ms)
 
     # FPS 표시
@@ -92,6 +106,6 @@ while True:
         break
 
 
-cap.release()
+# ★ cap.release() 삭제 (cap을 안 씀)
 landmarker.close()
 cv2.destroyAllWindows()
