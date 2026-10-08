@@ -73,3 +73,30 @@ class RecipeStep(Base):
 
     # N:1 부모 레시피 관계
     recipe: Mapped["Recipe"] = relationship("Recipe", back_populates="steps")
+
+    # 지능형 단계별 안전 감지 모드 분석 프로퍼티 (Context-Aware Safety)
+    @property
+    def safety_analysis(self):
+        from app.services.safety_analyzer import analyze_step_safety
+        total_steps = len(self.recipe.steps) if self.recipe and self.recipe.steps else None
+        category = self.recipe.category if self.recipe else None
+        return analyze_step_safety(
+            instruction=self.instruction,
+            required_tools=self.required_tools,
+            safety_warning=self.safety_warning,
+            step_number=self.step_number,
+            total_steps=total_steps,
+            category=category
+        )
+
+    @property
+    def is_knife_monitoring(self) -> bool:
+        return self.safety_analysis["is_knife_monitoring"]
+
+    @property
+    def is_unattended_monitoring(self) -> bool:
+        return self.safety_analysis["is_unattended_monitoring"]
+
+    @property
+    def active_hazards(self) -> list:
+        return self.safety_analysis["active_hazards"]

@@ -24,6 +24,9 @@ class RecipeStepResponse(BaseModel):
     tip: Optional[str] = None
     safety_warning: Optional[str] = None
     required_tools: Optional[str] = None
+    is_knife_monitoring: bool = False
+    is_unattended_monitoring: bool = False
+    active_hazards: List[str] = []
 
     model_config = ConfigDict(from_attributes=True)
 
