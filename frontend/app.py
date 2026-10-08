@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import importlib
 import uuid
+import base64  # 백엔드에서 보낸 Base64 음성 데이터를 해독하기 위해 임포트
 import api_client
 import recipe_viewer
 
@@ -18,12 +19,11 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- [세션 상태(Session State) 초기화] ---
+# 세션 상태(Session State) 초기화
 if "session_code" not in st.session_state:
     st.session_state.session_code = str(uuid.uuid4())
 if "current_step" not in st.session_state:
     st.session_state.current_step = 1
-# ----------------------------------------
 
 st.title("🍳 YO-Cook: 스마트 AI 쿠킹메이트")
 st.caption(f"AI 기반 실시간 비전 위험 감지 및 스마트 음성 요리 가이드 | 🔑 현재 세션: `{st.session_state.session_code}`")
@@ -32,7 +32,7 @@ st.markdown("---")
 # 화면을 2개의 큰 컬럼으로 분할 (좌측: 레시피 가이드, 우측: AI 비전 & 음성 어시스턴트)
 col_left, col_right = st.columns([1.1, 1], gap="large")
 
-# [좌측 영역] 레시피 검색, 선택, 식재료 및 단계별 가이드 (하석님 담당 모듈)
+# [좌측 영역] 레시피 검색, 선택, 식재료 및 단계별 가이드 (하석 담당 모듈)
 with col_left:
     selected_recipe_id = render_recipe_viewer()
 
@@ -62,7 +62,7 @@ with col_right:
                 data = {"session_code": st.session_state.session_code}
                 
                 try:
-                    # 요청 시 files와 data를 함께 넘깁니다.
+                    # 요청 시 files와 data를 함께 넘김
                     response = requests.post("http://localhost:8000/api/nlp/process-audio", files=files, data=data)
                     
                     if response.status_code == 200:
@@ -76,6 +76,14 @@ with col_right:
                         st.write(f"🗣️ **인식된 질문:** {result.get('recognized_text')}")
                         st.write(f"🧠 **파악된 의도:** {result.get('intent')}")
                         st.info(f"🤖 **YO-Cook의 답변:**\n\n{result.get('ai_response')}")
+                        
+                        # 음성 데이터(Base64) 디코딩 및 자동 재생
+                        if "audio_base64" in result:
+                            # 1. 텍스트(Base64)를 다시 오디오 바이트(Bytes)로 변환
+                            audio_bytes = base64.b64decode(result["audio_base64"])
+                            # 2. st.audio를 사용해 화면에 오디오 플레이어를 띄우고, autoplay=True로 즉시 재생
+                            st.audio(audio_bytes, format="audio/mp3", autoplay=True)
+                            
                     else:
                         st.error(f"서버 에러가 발생했습니다. (상태 코드: {response.status_code})")
                 except Exception as e:

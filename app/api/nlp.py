@@ -2,6 +2,9 @@ from fastapi import APIRouter, UploadFile, File, Form
 import whisper
 import os
 import shutil
+import base64                  # 오디오 데이터를 텍스트 형태로 변환
+from io import BytesIO         # 오디오 파일을 메모리에서 바로 처리
+from gtts import gTTS          # 텍스트를 음성으로 변환하는 라이브러리
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -41,7 +44,7 @@ async def process_audio(
     file: UploadFile = File(...),
     session_code: str = Form(...)  # 클라이언트로부터 세션 방 번호 받기
 ):
-    """클라이언트로부터 오디오 파일을 받아 STT, 의도 분석, 그리고 세션 맞춤형 최종 답변(RAG)을 반환합니다."""
+    """클라이언트로부터 오디오 파일을 받아 STT, 의도 분석, 그리고 세션 맞춤형 최종 답변(RAG) 및 음성 데이터를 반환합니다."""
     temp_file_path = f"temp_{file.filename}"
     
     with open(temp_file_path, "wb") as buffer:
@@ -57,13 +60,27 @@ async def process_audio(
         
         # 3. 세션 정보와 함께 RAG 파이프라인 호출
         rag_result = generate_session_aware_answer(recognized_text, intent, session_code)
+        ai_response_text = rag_result["answer"]
+        
+        # 4. TTS (텍스트 -> 음성) 변환
+        # gTTS를 사용하여 AI의 답변 텍스트를 한국어 음성으로 변환
+        tts = gTTS(text=ai_response_text, lang='ko', slow=False)
+        
+        # 하드디스크에 파일을 저장했다가 읽어오면 속도가 느려지므로 메모리(BytesIO)에 바로 저장
+        audio_fp = BytesIO()
+        tts.write_to_fp(audio_fp)
+        audio_fp.seek(0) # 커서를 처음으로 돌려서 읽을 준비를 합니다.
+        
+        # 5. 오디오 데이터를 Base64 문자열로 인코딩
+        audio_base64 = base64.b64encode(audio_fp.read()).decode('utf-8')
         
         return {
             "status": "success",
             "recognized_text": recognized_text,
             "intent": intent,
             "current_step": rag_result["current_step"], # 현재 조리 단계 반환
-            "ai_response": rag_result["answer"]         # AI의 안내 답변 반환
+            "ai_response": ai_response_text,            # AI의 안내 답변 반환
+            "audio_base64": audio_base64                # 인코딩된 음성 데이터 추가
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
