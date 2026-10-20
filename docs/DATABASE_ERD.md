@@ -22,6 +22,8 @@ erDiagram
         int id PK "사용자 식별자"
         string username UK "로그인 아이디"
         string nickname "닉네임"
+        boolean wake_word_enabled "호출어 인식 활성화 (ON/OFF)"
+        string wake_word "사용자 지정 호출어 (요쿡아/시리야)"
         datetime created_at "가입일시"
     }
 
@@ -76,6 +78,7 @@ erDiagram
         int recipe_id FK "레시피 ID"
         int current_step "현재 진행 단계"
         boolean is_completed "완료 여부"
+        string calibration_status "카메라 구도 세팅 상태 (VERIFIED/SKIPPED)"
         datetime started_at "시작일시"
         datetime ended_at "종료일시"
     }
@@ -84,10 +87,11 @@ erDiagram
         int id PK "안전로그 식별자"
         int session_id FK "조리 세션 ID"
         int step_number "발생 단계"
-        string hazard_type "위험 유형 (KNIFE, HEAT, OIL)"
+        string hazard_type "위험 유형 (UNATTENDED, KNIFE, HEAT)"
         string level "위험 등급 (INFO, WARNING, DANGER)"
         string message "경고 문구"
         float distance_px "손-칼날 거리 (px)"
+        int duration_seconds "위험/자리비움 지속시간 (초)"
         datetime detected_at "감지일시"
     }
 ```
@@ -96,12 +100,14 @@ erDiagram
 
 ## 2. 테이블 상세 명세서
 
-### 2.1 `USERS` (사용자 기본 정보)
+### 2.1 `USERS` (사용자 기본 정보 및 환경설정)
 | 컬럼명 | 데이터 타입 | 제약 조건 | 기본값 | 설명 |
 | :--- | :--- | :---: | :---: | :--- |
 | **`id`** | INTEGER | PK, Auto | - | 사용자 고유 번호 |
 | **`username`** | VARCHAR(50) | UK, NOT NULL | - | 로그인 아이디 (예: `cookmaster`, `chulsoo123`) |
 | **`nickname`** | VARCHAR(50) | NOT NULL | - | 사용자 닉네임 |
+| **`wake_word_enabled`** | BOOLEAN | NOT NULL | TRUE | 음성 호출어 인식 활성화 여부 (ON/OFF) |
+| **`wake_word`** | VARCHAR(50) | NOT NULL | '요쿡아' | 사용자 지정 호출어 (예: `요쿡아`, `시리야`) |
 | **`created_at`** | DATETIME | NOT NULL | now() | 가입 일시 |
 
 ### 2.2 `USER_FAVORITES` (레시피 즐겨찾기)
@@ -163,6 +169,7 @@ erDiagram
 | **`recipe_id`** | INTEGER | FK (recipes.id), NOT NULL | - | 조리 중인 레시피 ID |
 | **`current_step`** | INTEGER | NOT NULL | 1 | 현재 진행 중인 단계 |
 | **`is_completed`** | BOOLEAN | NOT NULL | False | 조리 완료 여부 |
+| **`calibration_status`** | VARCHAR(30) | NOT NULL | 'VERIFIED' | **카메라 구도 설정 방식** (`VERIFIED`: 도구 감지 완료, `SKIPPED`: 건너뛰기) |
 | **`started_at`** | DATETIME | NOT NULL | now() | 세션 시작 시간 |
 | **`ended_at`** | DATETIME | NULL | - | 세션 종료 시간 |
 
@@ -175,5 +182,6 @@ erDiagram
 | **`hazard_type`** | VARCHAR(50) | NOT NULL | - | 위험 유형 (`KNIFE_PROXIMITY`, `HEAT_ABSENCE` 등) |
 | **`level`** | VARCHAR(20) | NOT NULL | 'WARNING' | 위험 등급 (`INFO`, `WARNING`, `DANGER`) |
 | **`message`** | VARCHAR(255) | NOT NULL | - | 경고 문구 |
-| **`distance_px`** | FLOAT | NULL | - | 손-칼날 간 거리 (px) |
+| **`distance_px`** | FLOAT | NULL | - | 손-칼날 간 거리 (px, 칼 위험 시) |
+| **`duration_seconds`** | INTEGER | NULL | - | **위험/자리 비움 지속 시간** (초 단위) |
 | **`detected_at`** | DATETIME | NOT NULL | now() | 감지 일시 |

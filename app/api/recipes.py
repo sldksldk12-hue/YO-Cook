@@ -5,7 +5,7 @@ from sqlalchemy import select, or_
 
 from app.models.database import get_db
 from app.models.recipe import Recipe, Ingredient, RecipeStep
-from app.schemas.recipe import (
+from app.schemas.recipe_schema import (
     RecipeSummaryResponse,
     RecipeDetailResponse,
     IngredientResponse,
