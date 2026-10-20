@@ -6,3 +6,5 @@ logs/
 captures/
 test_videos/
 datasets/
+runs/
+Claude outputs/
