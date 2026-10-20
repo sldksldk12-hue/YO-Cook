@@ -1,0 +1,10 @@
+*.pt
+*.task
+weights/*.pt
+# Vision 테스트용 (용량 큼)
+logs/
+captures/
+test_videos/
+datasets/
+runs/
+Claude outputs/
