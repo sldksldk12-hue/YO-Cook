@@ -1,6 +1,6 @@
 *.pt
 *.task
-
+weights/*.pt
 # Vision 테스트용 (용량 큼)
 logs/
 captures/
