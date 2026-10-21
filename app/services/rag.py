@@ -103,10 +103,12 @@ def generate_session_aware_answer(user_question: str, intent: str, session_code:
             "question": user_question
         })
         
-        # 프론트엔드 UI 업데이트를 위해 답변과 함께 현재 단계 숫자도 반환
+        # 프론트엔드 UI 업데이트를 위해 답변과 함께 현재 단계 숫자 및 세션 ID/코드도 반환
         return {
             "answer": answer,
-            "current_step": current_step_num
+            "current_step": current_step_num,
+            "session_id": session.id,
+            "session_code": session.session_code
         }
     finally:
         db.close()

@@ -84,6 +84,8 @@ async def process_audio(
             "recognized_text": recognized_text,
             "intent": intent,
             "current_step": rag_result["current_step"], # 현재 조리 단계 반환
+            "session_id": rag_result.get("session_id"), # 현재 활성화된 세션 ID 반환 (프론트 UI 동기화용)
+            "session_code": rag_result.get("session_code"),
             "ai_response": ai_response_text,            # AI의 안내 답변 반환
             "audio_base64": audio_base64                # 인코딩된 음성 데이터 추가
         }
