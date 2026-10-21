@@ -1,10 +1,12 @@
 import os
+from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from dotenv import load_dotenv
 
-# .env 파일의 환경 변수 불러오기
-load_dotenv()
+# 어느 폴더에서 실행하든 yocook/.env 파일을 정확히 불러오도록 절대 경로 지정
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 MYSQL_USER = os.getenv("MYSQL_USER", "root")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")

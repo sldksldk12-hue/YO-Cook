@@ -12,6 +12,8 @@ pymysql
 streamlit
 requests
 python-multipart
+gTTS
+mediapipe
 
 # 일괄 설치
 # pip install -r requirements.txt

@@ -205,6 +205,23 @@ def record_safety_log(
             detail=f"ID {session_id}번에 해당하는 조리 세션을 찾을 수 없습니다."
         )
 
+    # 실시간 비전 상태 동기화
+    import time
+    from app.api.vision import vision_state, DEBOUNCE_COOLDOWN_SEC
+    now_ts = time.time()
+    vision_state["status"] = payload.level if payload.level in ("WARNING", "DANGER") else "WARNING"
+    vision_state["hazard_type"] = payload.hazard_type
+    vision_state["message"] = payload.message
+    vision_state["distance_px"] = payload.distance_px
+    vision_state["updated_at"] = now_ts
+
+    # [디바운싱 방어] 동일 세션에서 3초 이내에 중복 위험 로그가 들어오면 직전 로그를 반환하여 DB 폭주 방지
+    if session.safety_logs:
+        last_log = session.safety_logs[-1]
+        elapsed = (datetime.utcnow() - last_log.detected_at).total_seconds()
+        if elapsed < DEBOUNCE_COOLDOWN_SEC and last_log.hazard_type == payload.hazard_type:
+            return last_log
+
     log = SafetyLog(
         session_id=session_id,
         step_number=payload.step_number,
@@ -218,6 +235,7 @@ def record_safety_log(
     db.add(log)
     db.commit()
     db.refresh(log)
+    vision_state["last_db_log_at"] = now_ts
 
     return log
 

@@ -87,3 +87,11 @@ async def process_audio(
     finally:
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
+
+
+from app.api.vision import get_current_vision_status
+
+@router.get("/vision-status", summary="실시간 비전 위험 상태 조회 (프론트엔드 연동용)")
+def get_nlp_vision_status():
+    """프론트엔드(app.py)의 실시간 위험 감지 토글에서 호출하는 비전 안전 상태 엔드포인트입니다."""
+    return get_current_vision_status()

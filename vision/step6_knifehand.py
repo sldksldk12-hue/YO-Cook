@@ -12,6 +12,8 @@ import sys
 import csv
 import math
 import time
+import json
+import threading
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -50,6 +52,45 @@ LOG_DIR = BASE_DIR / "logs"
 CAP_DIR = BASE_DIR / "captures"
 LOG_DIR.mkdir(exist_ok=True)
 CAP_DIR.mkdir(exist_ok=True)
+MODEL_PATH.parent.mkdir(exist_ok=True)
+if not MODEL_PATH.exists():
+    print('[초기화] hand_landmarker.task 다운로드 중...')
+    urllib.request.urlretrieve(
+        'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+        str(MODEL_PATH)
+    )
+
+BACKEND_URL = 'http://localhost:8000/api/vision/status'
+_sync_state = {'last_status': 'SAFE', 'last_sent': 0.0}
+
+def notify_backend(out):
+    status = 'DANGER' if out['danger'] else ('WARNING' if out['close'] else 'SAFE')
+    now_t = time.time()
+    # 상태가 바뀌었거나 위험/주의 상태일 때 1초 간격으로 백엔드 전송 (백엔드에서 3초 디바운싱으로 DB 저장)
+    if status != _sync_state['last_status'] or (status != 'SAFE' and now_t - _sync_state['last_sent'] >= 1.0):
+        _sync_state['last_status'] = status
+        _sync_state['last_sent'] = now_t
+        dist_px = None
+        if out['ratio'] is not None and out['assist'] is not None:
+            dist_px = round(float(out['ratio'] * out['hands'][out['assist']]['palm_w']), 1)
+        payload = {
+            'status': status,
+            'hazard_type': 'KNIFE_PROXIMITY',
+            'ratio': round(float(out['ratio']), 3) if out['ratio'] is not None else None,
+            'distance_px': dist_px,
+        }
+        def _send():
+            try:
+                req = urllib.request.Request(
+                    BACKEND_URL,
+                    data=json.dumps(payload).encode('utf-8'),
+                    headers={'Content-Type': 'application/json'},
+                    method='POST'
+                )
+                urllib.request.urlopen(req, timeout=1.0).read()
+            except Exception:
+                pass
+        threading.Thread(target=_send, daemon=True).start()
 
 # ===== 모델 =====
 def blade_ids(m):
@@ -274,7 +315,7 @@ def draw(frame, out, fps):
 
 
 # ===== 입력 =====
-cap = cv2.VideoCapture(VIDEO) if VIDEO else None
+cap = cv2.VideoCapture(0 if VIDEO == 'webcam' else VIDEO) if VIDEO else None
 if cap is not None and not cap.isOpened():
     print(f"[영상 열기 실패] {VIDEO}  → dir test_videos 로 파일 이름 확인")
     sys.exit()
@@ -349,6 +390,7 @@ while True:
         last_ts = ts
 
         out = analyze(frame, ts)
+        notify_backend(out)
         annotated = draw(frame, out, fps_avg)
 
         b = out["blade"]
