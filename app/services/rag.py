@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+from sqlalchemy import desc
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -7,25 +9,47 @@ from dotenv import load_dotenv
 # DB 연동을 위한 SQLAlchemy 세션 및 모델 임포트
 from app.models.database import SessionLocal
 from app.models.session import CookingSession
+from app.models.recipe import Recipe
 
-# 환경 변수 로드
-load_dotenv()
+# 환경 변수 로드 (절대 경로 지정)
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 def generate_session_aware_answer(user_question: str, intent: str, session_code: str) -> dict:
     """세션 정보를 바탕으로 사용자의 현재 요리 단계를 추적하고 맞춤형 답변을 생성합니다."""
     db = SessionLocal()
     try:
-        # 1. 세션 조회
+        # 1. 세션 조회 (지정된 session_code 우선 -> 없으면 현재 진행 중인 최신 활성 세션으로 폴백)
         session = db.query(CookingSession).filter(CookingSession.session_code == session_code).first()
         if not session:
-            return {"answer": "유효한 요리 세션을 찾을 수 없습니다. 요리를 먼저 시작해 주세요.", "current_step": 0}
+            session = (
+                db.query(CookingSession)
+                .filter(CookingSession.is_completed == False)
+                .order_by(desc(CookingSession.started_at))
+                .first()
+            )
+        # 만약 진행 중인 세션도 없다면 DB의 첫 번째 레시피로 임시 컨텍스트 제공 (시연 중 에러 완벽 방지)
+        if not session:
+            first_recipe = db.query(Recipe).order_by(Recipe.id).first()
+            if not first_recipe:
+                return {"answer": "유효한 요리 세션을 찾을 수 없습니다. 요리를 먼저 시작해 주세요.", "current_step": 1}
+            session = CookingSession(
+                session_code=session_code,
+                recipe_id=first_recipe.id,
+                current_step=1,
+                is_completed=False,
+                calibration_status="VERIFIED"
+            )
+            db.add(session)
+            db.commit()
+            db.refresh(session)
         
         # 세션에 연결된 레시피 데이터와 현재 단계 가져오기
         recipe = session.recipe
         current_step_num = session.current_step
         
-        # 2. 의도(Intent)에 따른 세션 상태(현재 단계) 업데이트 로직
-        if intent == "[다음단계]":
+        # 2. 의도(Intent)에 따른 세션 상태(현재 단계) 업데이트 로직 (공백/대괄호 변형 모두 허용)
+        if "다음단계" in intent or "다음 단계" in intent:
             # 전체 조리 단계 중 다음 단계가 존재하는지 확인
             next_step = next((s for s in recipe.steps if s.step_number == current_step_num + 1), None)
             if next_step:
@@ -79,10 +103,12 @@ def generate_session_aware_answer(user_question: str, intent: str, session_code:
             "question": user_question
         })
         
-        # 프론트엔드 UI 업데이트를 위해 답변과 함께 현재 단계 숫자도 반환
+        # 프론트엔드 UI 업데이트를 위해 답변과 함께 현재 단계 숫자 및 세션 ID/코드도 반환
         return {
             "answer": answer,
-            "current_step": current_step_num
+            "current_step": current_step_num,
+            "session_id": session.id,
+            "session_code": session.session_code
         }
     finally:
         db.close()

@@ -1,4 +1,6 @@
-from fastapi import APIRouter, UploadFile, File, Form
+from fastapi import APIRouter, UploadFile, File, Form, Depends
+from sqlalchemy.orm import Session
+from pathlib import Path
 import whisper
 import os
 import shutil
@@ -12,8 +14,11 @@ from dotenv import load_dotenv
 
 # 기존 함수 대신 세션을 인식하는 새로운 RAG 함수 불러오기
 from app.services.rag import generate_session_aware_answer
+from app.models.database import get_db
+from app.api.vision import get_current_vision_status, _sync_active_session_step_flags
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 router = APIRouter()
 
@@ -79,6 +84,8 @@ async def process_audio(
             "recognized_text": recognized_text,
             "intent": intent,
             "current_step": rag_result["current_step"], # 현재 조리 단계 반환
+            "session_id": rag_result.get("session_id"), # 현재 활성화된 세션 ID 반환 (프론트 UI 동기화용)
+            "session_code": rag_result.get("session_code"),
             "ai_response": ai_response_text,            # AI의 안내 답변 반환
             "audio_base64": audio_base64                # 인코딩된 음성 데이터 추가
         }
@@ -89,11 +96,10 @@ async def process_audio(
             os.remove(temp_file_path)
 
 
-from app.api.vision import get_current_vision_status
-
 @router.get("/vision-status", summary="실시간 비전 위험 상태 조회 (프론트엔드 연동용)")
-def get_nlp_vision_status():
+def get_nlp_vision_status(db: Session = Depends(get_db)):
     """프론트엔드(app.py)의 실시간 위험 감지 토글에서 호출하는 비전 안전 상태 엔드포인트입니다."""
+    _sync_active_session_step_flags(db)
     return get_current_vision_status()
 
 

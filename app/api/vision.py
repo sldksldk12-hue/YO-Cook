@@ -1,12 +1,12 @@
 import time
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 from fastapi import APIRouter, UploadFile, File, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
-from app.models.database import get_db
+from app.models.database import get_db, SessionLocal
 from app.models.session import CookingSession, SafetyLog
 from app.api.websocket import manager
 
@@ -21,9 +21,13 @@ STATE_EXPIRY_SEC = 4.0       # 비전 신호가 4초 이상 끊기면 SAFE로 �
 vision_state = {
     "status": "SAFE",        # "SAFE" | "WARNING" | "DANGER"
     "hazard_type": "NONE",
-    "message": "현재 주방은 안전합니다.",
+    "message": "[안전] 현재 주방은 안전합니다.",
     "ratio": None,
     "distance_px": None,
+    "current_step": 1,
+    "is_knife_monitoring": True,
+    "is_unattended_monitoring": False,
+    "active_hazards": ["KNIFE"],
     "updated_at": 0.0,
     "last_db_log_at": 0.0,   # 마지막 DB 저장 시각 (디바운싱용)
 }
@@ -39,16 +43,49 @@ class VisionStatusReport(BaseModel):
     step_number: Optional[int] = Field(None, description="현재 조리 단계 번호")
 
 
+def _sync_active_session_step_flags(db: Session, session_id: Optional[int] = None) -> Optional[CookingSession]:
+    """
+    현재 진행 중인 조리 세션의 단계별 안전 모니터링 플래그(칼 감지 / 자리비움 감지)를 조회하여
+    vision_state에 동기화하고 대상 세션을 반환합니다.
+    """
+    try:
+        target_session = None
+        if session_id:
+            target_session = db.get(CookingSession, session_id)
+        else:
+            target_session = (
+                db.query(CookingSession)
+                .filter(CookingSession.is_completed == False)
+                .order_by(desc(CookingSession.started_at))
+                .first()
+            )
+
+        if target_session and target_session.recipe and target_session.recipe.steps:
+            step_num = target_session.current_step or 1
+            vision_state["current_step"] = step_num
+            current_step_obj = next(
+                (s for s in target_session.recipe.steps if s.step_number == step_num),
+                None
+            )
+            if current_step_obj:
+                vision_state["is_knife_monitoring"] = current_step_obj.is_knife_monitoring
+                vision_state["is_unattended_monitoring"] = current_step_obj.is_unattended_monitoring
+                vision_state["active_hazards"] = current_step_obj.active_hazards
+        return target_session
+    except Exception:
+        return None
+
+
 def get_current_vision_status() -> dict:
     """
-    현재 주방의 실시간 안전 상태를 반환합니다.
+    현재 주방의 실시간 안전 상태 및 현재 조리 단계의 안전 감지 모드를 반환합니다.
     비전 모듈로부터 일정 시간(STATE_EXPIRY_SEC) 동안 새로운 위험 신호가 없으면 SAFE로 자동 복귀합니다.
     """
     now = time.time()
     if vision_state["status"] != "SAFE" and (now - vision_state["updated_at"] > STATE_EXPIRY_SEC):
         vision_state["status"] = "SAFE"
         vision_state["hazard_type"] = "NONE"
-        vision_state["message"] = "현재 주방은 안전합니다."
+        vision_state["message"] = "[안전] 현재 주방은 안전합니다."
 
     return {
         "status": vision_state["status"],
@@ -56,12 +93,17 @@ def get_current_vision_status() -> dict:
         "message": vision_state["message"],
         "ratio": vision_state["ratio"],
         "distance_px": vision_state["distance_px"],
+        "current_step": vision_state["current_step"],
+        "is_knife_monitoring": vision_state["is_knife_monitoring"],
+        "is_unattended_monitoring": vision_state["is_unattended_monitoring"],
+        "active_hazards": vision_state["active_hazards"],
     }
 
 
-@router.get("/status", summary="실시간 비전 안전 상태 조회")
-def read_vision_status():
-    """프론트엔드에서 주기적으로 폴링하여 주방 위험 여부(SAFE/WARNING/DANGER)를 확인합니다."""
+@router.get("/status", summary="실시간 비전 안전 상태 및 단계별 감시 모드 조회")
+def read_vision_status(db: Session = Depends(get_db)):
+    """프론트엔드 및 비전 모듈에서 현재 주방 위험 여부(SAFE/WARNING/DANGER)와 단계별 감시 플래그를 확인합니다."""
+    _sync_active_session_step_flags(db)
     return get_current_vision_status()
 
 
@@ -74,6 +116,7 @@ async def update_vision_status(
     비전 스크립트(step6_knifehand.py 등)로부터 실시간 위험 판정 결과를 수신합니다.
     - 메모리의 최신 상태를 즉시 갱신합니다.
     - WARNING 또는 DANGER 상태일 때 3초 디바운싱(쿨타임)을 거쳐 활성 조리 세션의 safety_logs 테이블에 자동 기록합니다.
+    - 응답에 현재 단계의 is_knife_monitoring / is_unattended_monitoring 정보를 함께 내려줍니다.
     """
     now = time.time()
 
@@ -96,6 +139,8 @@ async def update_vision_status(
     vision_state["distance_px"] = payload.distance_px
     vision_state["updated_at"] = now
 
+    # 활성 세션 및 단계별 모니터링 플래그 동기화
+    target_session = _sync_active_session_step_flags(db, payload.session_id)
     logged_to_db = False
 
     # 2. WARNING / DANGER 발생 시 디바운싱(3초 쿨타임) 적용 후 DB 자동 기록
@@ -103,18 +148,6 @@ async def update_vision_status(
         if now - vision_state["last_db_log_at"] >= DEBOUNCE_COOLDOWN_SEC:
             vision_state["last_db_log_at"] = now
             try:
-                # 대상 세션 찾기: 지정된 session_id가 없으면 현재 진행 중(미완료)인 가장 최신 세션 조회
-                target_session = None
-                if payload.session_id:
-                    target_session = db.get(CookingSession, payload.session_id)
-                else:
-                    target_session = (
-                        db.query(CookingSession)
-                        .filter(CookingSession.is_completed == False)
-                        .order_by(desc(CookingSession.started_at))
-                        .first()
-                    )
-
                 if target_session:
                     step_num = payload.step_number or target_session.current_step or 1
                     new_log = SafetyLog(
@@ -147,7 +180,11 @@ async def update_vision_status(
     return {
         "result": "ok",
         "current_status": vision_state["status"],
-        "logged_to_db": logged_to_db
+        "logged_to_db": logged_to_db,
+        "current_step": vision_state["current_step"],
+        "is_knife_monitoring": vision_state["is_knife_monitoring"],
+        "is_unattended_monitoring": vision_state["is_unattended_monitoring"],
+        "active_hazards": vision_state["active_hazards"],
     }
 
 

@@ -33,11 +33,8 @@ st.markdown("---")
 
 col_left, col_right = st.columns([1.1, 1], gap="large")
 
-# [좌측 영역] 레시피 가이드
-with col_left:
-    selected_recipe_id = render_recipe_viewer()
-
 # [우측 영역] AI 실시간 인터랙션 (비전 + 자연어)
+# (음성 질문으로 단계 변경 시 좌측 레시피 뷰어에 즉시 반영되도록 상태 업데이트 연동)
 with col_right:
     # 1. 비전 섹션
     st.header("📷 실시간 주방 모니터링 (Vision)")
@@ -94,6 +91,10 @@ with col_right:
                         result = response.json()
                         if "current_step" in result:
                             st.session_state.current_step = result["current_step"]
+                        if result.get("session_id"):
+                            st.session_state.active_session_id = result["session_id"]
+                        if result.get("session_code"):
+                            st.session_state.session_code = result["session_code"]
                             
                         st.success("분석 완료!")
                         st.write(f"🗣️ **질문:** {result.get('recognized_text')}")
@@ -106,6 +107,10 @@ with col_right:
                     else:
                         st.error(f"서버 에러가 발생했습니다. (상태 코드: {response.status_code})")
                 except Exception as e:
-                    st.error(f"백엔드 서버에 연결할 수 없습니다.\n에러 내용: {e}")
+                    st.error("백엔드 서버에 연결할 수 없습니다.\n에러 내용: " + str(e))
         else:
             st.warning("먼저 음성 파일을 업로드해 주세요.")
+
+# [좌측 영역] 레시피 가이드 (우측 음성 명령에 의한 단계 변경이 같은 화면 렌더링에 즉시 반영됨)
+with col_left:
+    selected_recipe_id = render_recipe_viewer()
