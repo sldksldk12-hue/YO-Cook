@@ -1,6 +1,8 @@
 # uvicorn app.main:app --reload
 
+from pathlib import Path
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import recipes, sessions, favorites, users, nlp, vision, websocket
 
@@ -32,4 +34,11 @@ app.include_router(websocket.router, tags=["WebSocket"])
 
 @app.get("/")
 def read_root():
-    return {"message": "YO-Cook 서버가 정상적으로 실행 중입니다!"}
+    return {"message": "YO-Cook 서버가 정상적으로 실행 중입니다!", "mobile_app_url": "/app"}
+
+
+@app.get("/app", include_in_schema=False)
+def serve_mobile_app():
+    """모바일 및 웹 브라우저용 통합 YO-Cook 앱 UI를 반환합니다."""
+    html_path = Path(__file__).resolve().parent / "static" / "mobile_app.html"
+    return FileResponse(html_path)

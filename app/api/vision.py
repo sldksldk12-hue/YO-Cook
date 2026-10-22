@@ -1,7 +1,11 @@
 import time
+import math
+import base64
+import urllib.request
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Literal, List
-from fastapi import APIRouter, UploadFile, File, Depends
+from fastapi import APIRouter, UploadFile, File, Form, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
@@ -27,10 +31,212 @@ vision_state = {
     "current_step": 1,
     "is_knife_monitoring": True,
     "is_unattended_monitoring": False,
-    "active_hazards": ["KNIFE"],
+    "active_hazards": ["KNIFE_PROXIMITY"],
+    "latest_frame_b64": None,  # 실시간 중계용 최신 분석 프레임 (Base64 JPEG)
     "updated_at": 0.0,
     "last_db_log_at": 0.0,   # 마지막 DB 저장 시각 (디바운싱용)
 }
+
+# =====================================================================
+# 모바일/웹 카메라 실시간 프레임 분석용 Lazy-Loaded 비전 엔진 (step6 알고리즘 호환)
+# =====================================================================
+_vision_engine = {
+    "initialized": False,
+    "yolo": None,
+    "blade_ids": [],
+    "landmarker": None,
+}
+TIPS = [4, 8, 12, 16, 20]
+FINGERS = [(6, 8), (10, 12), (14, 16), (18, 20)]
+MARGIN = 0.5
+
+
+def _init_vision_engine():
+    """첫 카메라 프레임 요청 시 YOLO 및 MediaPipe HandLandmarker를 1회 초기화합니다."""
+    if _vision_engine["initialized"]:
+        return
+    import cv2
+    import mediapipe as mp
+    from ultralytics import YOLO
+    from mediapipe.tasks import python
+    from mediapipe.tasks.python import vision as mp_vision
+
+    base_dir = Path(__file__).resolve().parent.parent.parent
+    weights_dir = base_dir / "vision" / "weights"
+    weights_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. YOLO 모델 로드 (커스텀 OBB 모델이 있으면 우선 사용, 없으면 경량 seg 모델 사용)
+    trained_pt = weights_dir / "knife_obb_v1.pt"
+    model_path = str(trained_pt) if trained_pt.exists() else "yolo11n-seg.pt"
+    yolo_model = YOLO(model_path)
+    blade_ids = [k for k, v in yolo_model.names.items() if v in ("knife", "scissors")]
+
+    # 2. MediaPipe HandLandmarker 로드 (없으면 자동 다운로드)
+    task_path = weights_dir / "hand_landmarker.task"
+    if not task_path.exists():
+        urllib.request.urlretrieve(
+            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+            str(task_path)
+        )
+    options = mp_vision.HandLandmarkerOptions(
+        base_options=python.BaseOptions(model_asset_buffer=task_path.read_bytes()),
+        running_mode=mp_vision.RunningMode.IMAGE,
+        num_hands=2,
+        min_hand_detection_confidence=0.3,
+        min_hand_presence_confidence=0.3,
+    )
+    landmarker = mp_vision.HandLandmarker.create_from_options(options)
+
+    _vision_engine["yolo"] = yolo_model
+    _vision_engine["blade_ids"] = blade_ids
+    _vision_engine["landmarker"] = landmarker
+    _vision_engine["initialized"] = True
+
+
+def _analyze_mobile_frame(frame_bgr):
+    """
+    모바일/웹 카메라에서 전송된 프레임을 step6_knifehand.py와 동일한 규칙으로 분석하고
+    칼 다각형과 손 관절이 그려진 이미지 및 판정 결과를 반환합니다.
+    """
+    import cv2
+    import numpy as np
+    import mediapipe as mp
+
+    _init_vision_engine()
+    yolo_model = _vision_engine["yolo"]
+    blade_ids = _vision_engine["blade_ids"]
+    landmarker = _vision_engine["landmarker"]
+
+    h, w, _ = frame_bgr.shape
+
+    def _dist(a, b):
+        return math.hypot(a[0] - b[0], a[1] - b[1])
+
+    def _dist_to_blade(p, poly):
+        d = cv2.pointPolygonTest(poly.reshape(-1, 1, 2), (float(p[0]), float(p[1])), True)
+        return max(0.0, -d)
+
+    def _nearest_on_blade(p, poly):
+        best, best_d = None, None
+        for i in range(len(poly)):
+            a, b = poly[i], poly[(i + 1) % len(poly)]
+            ab = b - a
+            t = np.clip(np.dot(np.array(p, np.float32) - a, ab) / max(np.dot(ab, ab), 1e-6), 0, 1)
+            q = a + t * ab
+            d = _dist(p, q)
+            if best_d is None or d < best_d:
+                best, best_d = q, d
+        return int(best[0]), int(best[1])
+
+    def _at_end(p, poly, end_frac=0.25, side_frac=0.15):
+        e0, e1 = poly[1] - poly[0], poly[2] - poly[1]
+        long_e, short_e = (e0, e1) if np.linalg.norm(e0) >= np.linalg.norm(e1) else (e1, e0)
+        L, S = np.linalg.norm(long_e), np.linalg.norm(short_e)
+        if L < 1.3 * max(S, 1):
+            return None
+        u = long_e / L
+        v = np.array([-u[1], u[0]], np.float32)
+        d = np.array(p, np.float32) - poly.mean(axis=0)
+        t = np.dot(d, u) / L
+        s = abs(np.dot(d, v))
+        return abs(t) > 0.5 - end_frac and s < S / 2 + L * side_frac
+
+    # 1. 칼(또는 가위) 탐지
+    r = yolo_model(frame_bgr, imgsz=480, conf=0.22, verbose=False)[0]
+    blade = None
+    if r.obb is not None:
+        for poly, c, cls in zip(r.obb.xyxyxyxy.cpu().numpy(), r.obb.conf.tolist(), r.obb.cls.tolist()):
+            if int(cls) in blade_ids and (blade is None or c > blade["conf"]):
+                blade = {"conf": c, "name": yolo_model.names[int(cls)], "poly": poly.astype(np.float32)}
+    elif r.boxes is not None:
+        for i, b in enumerate(r.boxes):
+            cls = int(b.cls[0])
+            if cls not in blade_ids:
+                continue
+            c = float(b.conf[0])
+            if blade is not None and c <= blade["conf"]:
+                continue
+            x1, y1, x2, y2 = [float(v) for v in b.xyxy[0].tolist()]
+            poly = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], np.float32)
+            if r.masks is not None and i < len(r.masks.xy):
+                seg = r.masks.xy[i]
+                if len(seg) >= 3:
+                    poly = cv2.boxPoints(cv2.minAreaRect(seg.astype(np.float32))).astype(np.float32)
+            blade = {"conf": c, "name": yolo_model.names[cls], "poly": poly}
+
+    # 2. 손 관절 탐지
+    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    res = landmarker.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb))
+    hands = []
+    for hand in res.hand_landmarks:
+        pts = [(int(lm.x * w), int(lm.y * h)) for lm in hand]
+        palm_w = max(_dist(pts[5], pts[17]), 1.0)
+        hands.append({"pts": pts, "palm_w": palm_w})
+
+    grip = assist = ratio = tip_idx = None
+    close = danger = False
+    exposed = 0
+    dist_px = None
+
+    if blade is not None and hands:
+        poly = blade["poly"]
+        gaps = [_dist_to_blade(hd["pts"][9], poly) for hd in hands]
+        ends = [_at_end(hd["pts"][9], poly) for hd in hands]
+
+        if len(hands) >= 2:
+            if ends[0] is True and ends[1] is not True:
+                grip = 0
+            elif ends[1] is True and ends[0] is not True:
+                grip = 1
+            else:
+                grip = gaps.index(min(gaps))
+            assist = 1 - grip
+        elif ends[0] is True or (ends[0] is None and gaps[0] <= hands[0]["palm_w"] * 0.3):
+            grip = 0
+        else:
+            assist = 0
+
+        if assist is not None:
+            a = hands[assist]
+            ratios = [_dist_to_blade(a["pts"][i], poly) / a["palm_w"] for i in TIPS]
+            k = ratios.index(min(ratios))
+            ratio, tip_idx = ratios[k], TIPS[k]
+            dist_px = round(float(ratio * a["palm_w"]), 1)
+            close = ratio <= MARGIN
+
+            for pip, tip in FINGERS:
+                d_pip, d_tip = _dist_to_blade(a["pts"][pip], poly), _dist_to_blade(a["pts"][tip], poly)
+                if not (d_pip == 0 and d_tip == 0) and (d_tip < d_pip - a["palm_w"] * 0.1):
+                    exposed += 1
+            danger = close and exposed >= 1
+
+    # 3. 프론트엔드 투명 캔버스(60fps 무끊김 오버레이)용 경량 좌표 데이터 구성
+    blade_poly_list = blade["poly"].astype(int).tolist() if blade else None
+    hands_payload = []
+    for i, hd in enumerate(hands):
+        role = "grip" if i == grip else ("assist" if i == assist else "other")
+        hands_payload.append({"role": role, "pts": hd["pts"]})
+
+    nearest_line = None
+    if ratio is not None and blade and assist is not None:
+        tip_pt = hands[assist]["pts"][tip_idx]
+        near_pt = _nearest_on_blade(tip_pt, blade["poly"])
+        nearest_line = [list(tip_pt), list(near_pt)]
+
+    status_str = "DANGER" if danger else ("WARNING" if close else "SAFE")
+    return {
+        "status": status_str,
+        "blade_detected": blade is not None,
+        "hands_count": len(hands),
+        "ratio": round(float(ratio), 3) if ratio is not None else None,
+        "distance_px": dist_px,
+        "exposed_fingers": exposed,
+        "frame_w": w,
+        "frame_h": h,
+        "blade_poly": blade_poly_list,
+        "hands": hands_payload,
+        "nearest_line": nearest_line,
+    }
 
 
 class VisionStatusReport(BaseModel):
@@ -188,14 +394,49 @@ async def update_vision_status(
     }
 
 
-@router.post("/detect")
-async def detect_objects(file: UploadFile = File(...)):
+@router.post("/detect", summary="모바일/웹 카메라 실시간 프레임 비전 분석 API")
+async def detect_objects(
+    file: UploadFile = File(...),
+    session_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db)
+):
     """
-    클라이언트(웹캠)로부터 이미지를 받아 주방 도구와 위험 상황을 탐지합니다.
+    모바일 앱(또는 웹캠)으로부터 실시간 프레임을 받아 step6 알고리즘(YOLO + MediaPipe Hands)으로
+    칼 다각형과 고양이손 위험 여부를 판별하고, 오버레이된 이미지(Base64)와 위험 상태를 반환합니다.
     """
+    import cv2
+    import numpy as np
+
+    raw_bytes = await file.read()
+    arr = np.frombuffer(raw_bytes, np.uint8)
+    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if frame is None:
+        return {"status": "error", "message": "유효하지 않은 이미지 프레임입니다."}
+
+    analysis = _analyze_mobile_frame(frame)
+
+    # 상태 업데이트 및 디바운싱 DB 로깅 연동
+    report = VisionStatusReport(
+        status=analysis["status"],
+        hazard_type="KNIFE_PROXIMITY",
+        ratio=analysis["ratio"],
+        distance_px=analysis["distance_px"],
+        session_id=session_id
+    )
+    status_res = await update_vision_status(report, db)
+
     return {
         "status": "success",
-        "message": "비전 객체 탐지 API가 정상적으로 호출되었습니다.",
-        "detected_objects": [],
-        "vision_state": get_current_vision_status()
+        "vision_status": analysis["status"],
+        "blade_detected": analysis["blade_detected"],
+        "hands_count": analysis["hands_count"],
+        "ratio": analysis["ratio"],
+        "distance_px": analysis["distance_px"],
+        "frame_w": analysis["frame_w"],
+        "frame_h": analysis["frame_h"],
+        "blade_poly": analysis["blade_poly"],
+        "hands": analysis["hands"],
+        "nearest_line": analysis["nearest_line"],
+        "step_info": status_res,
+        "message": vision_state["message"]
     }

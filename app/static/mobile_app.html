@@ -1,0 +1,1109 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#ff6b35" />
+  <title>YO-Cook 스마트 AI 쿠킹메이트</title>
+  <style>
+    :root {
+      --primary: #ff6b35;
+      --primary-dark: #e8531e;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --safe: #10b981;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --border: #e2e8f0;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Malgun Gothic", sans-serif;
+      background: #1e293b;
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    /* 스마트폰 앱 프레임 (모바일에서는 100% 꽉 차고, PC에서는 스마트폰 모양으로 중앙 정렬) */
+    .app-shell {
+      width: 100%;
+      max-width: 460px;
+      min-height: 100vh;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+      overflow-x: hidden;
+      padding-bottom: 76px;
+      transition: box-shadow 0.2s ease;
+    }
+    .app-shell.danger-flash {
+      animation: sirenBorder 0.7s infinite alternate;
+    }
+    @keyframes sirenBorder {
+      0% { box-shadow: inset 0 0 0 4px var(--danger), 0 0 30px rgba(239,68,68,0.8); }
+      100% { box-shadow: inset 0 0 0 12px var(--danger), 0 0 50px rgba(239,68,68,1); }
+    }
+
+    /* 상단 헤더 */
+    .app-header {
+      background: var(--card);
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 30;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 800;
+      font-size: 19px;
+      color: var(--primary);
+    }
+    .status-pill {
+      font-size: 12px;
+      font-weight: 700;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: #ecfdf5;
+      color: #047857;
+      border: 1px solid #a7f3d0;
+    }
+    .status-pill.warn { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+    .status-pill.danger { background: #fef2f2; color: #b91c1c; border-color: #fecaca; animation: pulse 0.8s infinite; }
+
+    /* 화면 섹션 */
+    .screen { display: none; padding: 14px; flex-direction: column; gap: 14px; }
+    .screen.active { display: flex; }
+
+    /* 검색 및 필터 바 */
+    .search-box {
+      display: flex;
+      gap: 8px;
+    }
+    .search-input {
+      flex: 1;
+      padding: 11px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      font-size: 14px;
+      background: var(--card);
+    }
+    .filter-row {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+    .chip {
+      padding: 7px 13px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--muted);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .chip.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
+    /* 레시피 카드 */
+    .recipe-card {
+      background: var(--card);
+      border-radius: 16px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      cursor: pointer;
+      transition: transform 0.12s ease;
+    }
+    .recipe-card:active { transform: scale(0.98); }
+    .recipe-thumb {
+      width: 78px;
+      height: 78px;
+      border-radius: 12px;
+      object-fit: cover;
+      background: #f1f5f9;
+      flex-shrink: 0;
+    }
+    .recipe-info { flex: 1; min-width: 0; }
+    .recipe-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .recipe-meta {
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .recipe-tags {
+      font-size: 11px;
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    /* 선택된 레시피 상세 시트 */
+    .detail-card {
+      background: var(--card);
+      border-radius: 18px;
+      padding: 16px;
+      border: 1px solid var(--border);
+    }
+    .btn-primary {
+      width: 100%;
+      padding: 14px;
+      border-radius: 14px;
+      border: none;
+      background: var(--primary);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 800;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 14px rgba(255,107,53,0.35);
+    }
+    .btn-primary:active { background: var(--primary-dark); }
+
+    /* 쿠킹 화면: 카메라 & 비전 영역 */
+    .vision-box {
+      background: #0f172a;
+      border-radius: 18px;
+      overflow: hidden;
+      position: relative;
+      aspect-ratio: 4 / 3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #94a3b8;
+    }
+    .vision-box video, .vision-box img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .vision-overlay-top {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 10;
+    }
+    .cam-badge {
+      background: rgba(15,23,42,0.75);
+      backdrop-filter: blur(6px);
+      color: #fff;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .cam-btn {
+      background: rgba(255,255,255,0.9);
+      color: #0f172a;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .alert-banner {
+      padding: 12px 14px;
+      border-radius: 14px;
+      font-weight: 700;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .alert-banner.safe { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+    .alert-banner.warn { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+    .alert-banner.danger { background: #fef2f2; color: #991b1b; border: 2px solid #ef4444; }
+
+    /* 쿠킹 단계 카드 */
+    .step-card {
+      background: var(--card);
+      border-radius: 18px;
+      padding: 18px;
+      border: 1px solid var(--border);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+    }
+    .step-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .step-badge {
+      background: #fff7ed;
+      color: var(--primary);
+      font-weight: 800;
+      font-size: 13px;
+      padding: 4px 10px;
+      border-radius: 8px;
+    }
+    .hazard-mode-badges {
+      display: flex;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .h-badge {
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: #f1f5f9;
+      color: #64748b;
+    }
+    .h-badge.on { background: #fee2e2; color: #b91c1c; }
+    .step-instruction {
+      font-size: 19px;
+      font-weight: 700;
+      line-height: 1.45;
+      color: #0f172a;
+      margin-bottom: 12px;
+    }
+    .step-Controls {
+      display: grid;
+      grid-template-columns: 1fr 1.3fr;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .btn-sec {
+      padding: 13px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #f8fafc;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    /* AI 음성 대화 카드 */
+    .voice-card {
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      color: #fff;
+      border-radius: 18px;
+      padding: 16px;
+    }
+    .voice-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .wave-dots {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .wave-dots span {
+      width: 4px;
+      height: 12px;
+      background: #38bdf8;
+      border-radius: 4px;
+      display: inline-block;
+    }
+    .wave-dots.listening span {
+      animation: waveAnim 0.9s infinite ease-in-out;
+    }
+    .wave-dots.listening span:nth-child(2) { animation-delay: 0.15s; }
+    .wave-dots.listening span:nth-child(3) { animation-delay: 0.3s; }
+    .wave-dots.listening span:nth-child(4) { animation-delay: 0.45s; }
+    @keyframes waveAnim {
+      0%, 100% { height: 6px; background: #38bdf8; }
+      50% { height: 18px; background: #22c55e; }
+    }
+    .voice-bubble {
+      background: rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 11px 13px;
+      font-size: 14px;
+      line-height: 1.45;
+      margin-top: 8px;
+    }
+    .voice-btn-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .btn-voice {
+      flex: 1;
+      padding: 11px;
+      border-radius: 10px;
+      border: none;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      background: #22c55e;
+      color: #fff;
+    }
+    .btn-voice.off { background: #475569; }
+
+    /* 하단 네비게이션 탭바 */
+    .bottom-nav {
+      position: fixed;
+      bottom: 0;
+      width: 100%;
+      max-width: 460px;
+      background: var(--card);
+      border-top: 1px solid var(--border);
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      padding: 8px 0 12px;
+      z-index: 40;
+    }
+    .nav-item {
+      border: none;
+      background: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .nav-item.active { color: var(--primary); }
+    .nav-icon { font-size: 20px; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell" id="app-shell">
+    <!-- 상단 앱 바 -->
+    <header class="app-header">
+      <div class="brand">🍳 YO-Cook</div>
+      <div class="status-pill" id="header-status-pill">🛡️ 주방 안전</div>
+    </header>
+
+    <!-- [탭 1] 홈: 레시피 탐색 및 요리 시작 -->
+    <section class="screen active" id="screen-home">
+      <div class="search-box">
+        <input type="text" id="search-input" class="search-input" placeholder="🔍 요리명이나 재료 검색 (예: 김치, 계란)" oninput="loadRecipes()" />
+      </div>
+      <div class="filter-row">
+        <button class="chip active" onclick="setFilter('전체', this)">전체</button>
+        <button class="chip" onclick="setFilter('찜', this)">❤️ 찜한 요리</button>
+        <button class="chip" onclick="setFilter('초급', this)">🌱 초급</button>
+        <button class="chip" onclick="setFilter('중급', this)">🔥 중급</button>
+      </div>
+
+      <!-- 선택된 레시피 상세 미리보기 -->
+      <div id="recipe-preview-box" style="display:none;"></div>
+
+      <!-- 레시피 리스트 -->
+      <div id="recipe-list" style="display:flex; flex-direction:column; gap:10px;">
+        <div style="text-align:center; padding:30px; color:var(--muted);">레시피를 불러오는 중...</div>
+      </div>
+    </section>
+
+    <!-- [탭 2] 쿠킹 모드: 실시간 카메라 + 단계 가이드 + 음성 대화 -->
+    <section class="screen" id="screen-cook">
+      <!-- 1. 실시간 안전 배너 -->
+      <div class="alert-banner safe" id="safety-banner">
+        <span>🛡️</span>
+        <span id="safety-banner-text">현재 주방은 안전합니다. 안심하고 조리하세요!</span>
+      </div>
+
+      <!-- 2. 실시간 카메라 뷰어 (모바일 자체 카메라 분석 or 외부 step6 연동) -->
+      <div class="vision-box">
+        <div class="vision-overlay-top">
+          <span class="cam-badge" id="cam-status-badge">📷 실시간 AI 비전 대기 중</span>
+          <button class="cam-btn" id="cam-toggle-btn" onclick="toggleMobileCamera()">📷 내 카메라 켜기</button>
+        </div>
+        <video id="raw-video" autoplay playsinline muted style="display:none; width:100%; height:100%; object-fit:cover;"></video>
+        <canvas id="capture-canvas" style="display:none;"></canvas>
+        <canvas id="overlay-canvas" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
+        <div id="cam-placeholder" style="text-align:center; padding:20px;">
+          <div style="font-size:32px; margin-bottom:6px;">🔪 + 🤚</div>
+          <div style="font-size:13px;"><b>[내 카메라 켜기]</b>를 누르면 스마트폰 카메라로<br/>칼날과 손가락 거리를 실시간 감시합니다.</div>
+          <div style="font-size:11px; margin-top:4px; opacity:0.75;">(PC에서 step6_knifehand.py 실행 시에도 자동 연동됩니다)</div>
+        </div>
+      </div>
+
+      <!-- 3. 현재 요리 단계 카드 -->
+      <div class="step-card">
+        <div class="step-header">
+          <span class="step-badge" id="cook-step-badge">1 / 1 단계</span>
+          <div class="hazard-mode-badges">
+            <span class="h-badge on" id="badge-knife">🔪 칼날감시 ON</span>
+            <span class="h-badge" id="badge-heat">🔥 화구감시 OFF</span>
+          </div>
+        </div>
+        <div style="font-size:13px; color:var(--muted); margin-bottom:4px;" id="cook-recipe-title">오늘의 요리</div>
+        <div class="step-instruction" id="cook-step-instruction">레시피 탭에서 요리를 먼저 시작해 주세요.</div>
+        <div id="cook-step-warning" style="font-size:13px; color:#b45309; background:#fffbeb; padding:8px 10px; border-radius:8px; display:none; margin-bottom:8px;"></div>
+
+        <!-- 타이머 영역 -->
+        <div id="timer-box" style="display:none; align-items:center; justify-content:space-between; background:#f1f5f9; padding:10px 14px; border-radius:12px; margin-top:8px;">
+          <span style="font-weight:800; font-size:16px;" id="timer-display">⏱️ 00:00</span>
+          <button class="cam-btn" style="background:var(--primary); color:#fff;" onclick="toggleTimer()" id="timer-btn">타이머 시작</button>
+        </div>
+
+        <div class="step-Controls">
+          <button class="btn-sec" onclick="changeStep('PREV')">⬅️ 이전 단계</button>
+          <button class="btn-primary" id="next-or-finish-btn" onclick="changeStep('NEXT')">다음 단계 ➡️</button>
+        </div>
+      </div>
+
+      <!-- 4. 핸즈프리 AI 음성 어시스턴트 ("요쿡아") -->
+      <div class="voice-card">
+        <div class="voice-top">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <div class="wave-dots" id="voice-wave">
+              <span></span><span></span><span></span><span></span>
+            </div>
+            <strong style="font-size:14px;" id="voice-title">🎙️ AI 보이스 어시스턴트 ("요쿡아")</strong>
+          </div>
+          <label style="font-size:12px; display:flex; align-items:center; gap:4px; cursor:pointer;">
+            <input type="checkbox" id="wake-check" checked onchange="toggleWakeWordSetting(this.checked)" />
+            '요쿡아' 호출어
+          </label>
+        </div>
+
+        <div class="voice-bubble" id="voice-transcript">
+          💬 아래 <b>[핸즈프리 연속 대화]</b>를 켜거나 <b>[눌러서 말하기]</b>로 질문해 보세요!<br/>
+          <span style="font-size:12px; color:#94a3b8;">예: "요쿡아 다음 단계 알려줘", "양파 없으면 뭐 넣어?"</span>
+        </div>
+        <div class="voice-bubble" id="voice-ai-reply" style="display:none; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.3);"></div>
+
+        <div class="voice-btn-row">
+          <button class="btn-voice off" id="handsfree-btn" onclick="toggleHandsFree()">🟢 핸즈프리 연속 대화 켜기</button>
+          <button class="btn-voice" style="background:#3b82f6;" id="record-once-btn" onclick="recordAudioClip()">🎤 3초 녹음 질문</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- [탭 3] 안전 리포트 -->
+    <section class="screen" id="screen-report">
+      <div class="detail-card" id="report-container">
+        <h3 style="margin-bottom:8px;">📊 조리 안전 리포트</h3>
+        <p style="font-size:14px; color:var(--muted);">요리를 완료하면 총 소요 시간과 AI 비전이 감지한 안전 경고 이력이 여기에 표시됩니다.</p>
+      </div>
+    </section>
+
+    <!-- 하단 앱 네비게이션 바 -->
+    <nav class="bottom-nav">
+      <button class="nav-item active" id="nav-home" onclick="switchTab('home')">
+        <span class="nav-icon">📖</span>
+        <span>레시피</span>
+      </button>
+      <button class="nav-item" id="nav-cook" onclick="switchTab('cook')">
+        <span class="nav-icon">🍳</span>
+        <span>쿠킹·비전</span>
+      </button>
+      <button class="nav-item" id="nav-report" onclick="switchTab('report')">
+        <span class="nav-icon">📊</span>
+        <span>안전리포트</span>
+      </button>
+    </nav>
+  </div>
+
+  <script>
+    const API = window.location.origin;
+    let currentFilter = "전체";
+    let activeSessionId = null;
+    let activeSessionCode = "COOK-MOBILE";
+    let currentStep = 1;
+    let totalSteps = 1;
+    let timerSeconds = 0;
+    let timerInterval = null;
+
+    // 카메라 & 비전 상태
+    let cameraStream = null;
+    let frameTimer = null;
+    let statusPollTimer = null;
+    let lastDangerBeepAt = 0;
+
+    // 음성 인식 상태
+    let recognition = null;
+    let handsFreeOn = false;
+    let isAiSpeaking = false;
+
+    // 1. 탭 전환
+    function switchTab(tab) {
+      document.querySelectorAll(".screen").forEach(el => el.classList.remove("active"));
+      document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
+      document.getElementById("screen-" + tab).classList.add("active");
+      document.getElementById("nav-" + tab).classList.add("active");
+    }
+
+    // 2. 레시피 목록 로드
+    function setFilter(filter, btn) {
+      currentFilter = filter;
+      document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+      btn.classList.add("active");
+      loadRecipes();
+    }
+
+    async function loadRecipes() {
+      const kw = document.getElementById("search-input").value.trim();
+      const listEl = document.getElementById("recipe-list");
+      try {
+        let recipes = [];
+        if (currentFilter === "찜") {
+          const r = await fetch(`${API}/api/favorites/users/1/favorites`);
+          const data = await r.json();
+          recipes = data.recipes || [];
+          if (kw) recipes = recipes.filter(x => x.title.includes(kw));
+        } else {
+          const params = new URLSearchParams();
+          if (kw) params.set("keyword", kw);
+          if (currentFilter === "초급" || currentFilter === "중급") params.set("difficulty", currentFilter);
+          const r = await fetch(`${API}/api/recipes?` + params.toString());
+          recipes = await r.json();
+        }
+
+        if (!recipes.length) {
+          listEl.innerHTML = `<div style="text-align:center; padding:30px; color:var(--muted);">조건에 맞는 레시피가 없습니다.</div>`;
+          return;
+        }
+
+        listEl.innerHTML = recipes.map(r => `
+          <div class="recipe-card" onclick="openRecipePreview(${r.id})">
+            <img class="recipe-thumb" src="${r.thumbnail_url || 'https://via.placeholder.com/80?text=Cook'}" onerror="this.src='https://via.placeholder.com/80?text=Cook'" />
+            <div class="recipe-info">
+              <div class="recipe-title">${r.title}</div>
+              <div class="recipe-meta">
+                <span>⏱️ ${r.cooking_time_minutes}분</span>
+                <span>⭐ ${r.difficulty}</span>
+                <span>🍽️ ${r.servings}</span>
+              </div>
+              <div class="recipe-tags">${r.tags || '#집밥 #AI쿠킹'}</div>
+            </div>
+          </div>
+        `).join("");
+      } catch (e) {
+        listEl.innerHTML = `<div style="color:var(--danger); padding:20px;">서버 연결 오류: ${e}</div>`;
+      }
+    }
+
+    // 3. 레시피 상세 미리보기 및 요리 시작
+    async function openRecipePreview(recipeId) {
+      const box = document.getElementById("recipe-preview-box");
+      const [detailRes, favRes] = await Promise.all([
+        fetch(`${API}/api/recipes/${recipeId}`),
+        fetch(`${API}/api/favorites/recipes/${recipeId}/favorite-status?user_id=1`)
+      ]);
+      const d = await detailRes.json();
+      const fav = await favRes.json();
+
+      const ings = (d.ingredients || []).map(i => `${i.name}(${i.amount})`).join(", ");
+      box.style.display = "block";
+      box.innerHTML = `
+        <div class="detail-card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <h3 style="font-size:18px;">${d.title}</h3>
+            <button class="chip ${fav.is_favorited ? 'active' : ''}" onclick="toggleFav(${d.id})">
+              ${fav.is_favorited ? '❤️ 찜 완료' : '🤍 찜하기'} (${fav.total_favorites_count})
+            </button>
+          </div>
+          <p style="font-size:13px; color:var(--muted); margin-bottom:10px;">${d.description || ''}</p>
+          <div style="font-size:12px; background:#f8fafc; padding:10px; border-radius:10px; margin-bottom:12px;">
+            <strong>🥦 필수 식재료:</strong> ${ings || '상세 단계 참고'}
+          </div>
+          <button class="btn-primary" onclick="startCooking(${d.id})">🍳 이 레시피로 요리 시작하기</button>
+        </div>
+      `;
+      box.scrollIntoView({ behavior: "smooth" });
+    }
+
+    async function toggleFav(recipeId) {
+      await fetch(`${API}/api/favorites/recipes/${recipeId}/favorite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: 1 })
+      });
+      openRecipePreview(recipeId);
+    }
+
+    async function startCooking(recipeId) {
+      const res = await fetch(`${API}/api/sessions/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipe_id: recipeId, user_id: 1, calibration_status: "VERIFIED" })
+      });
+      const sess = await res.json();
+      activeSessionId = sess.id;
+      activeSessionCode = sess.session_code;
+      await refreshSessionUI();
+      switchTab("cook");
+    }
+
+    // 4. 현재 조리 단계 UI 동기화
+    async function refreshSessionUI() {
+      if (!activeSessionId) return;
+      const res = await fetch(`${API}/api/sessions/${activeSessionId}`);
+      if (!res.ok) return;
+      const s = await res.json();
+
+      currentStep = s.current_step;
+      totalSteps = Math.max(s.total_steps, 1);
+      document.getElementById("cook-recipe-title").innerText = `🔥 ${s.recipe_title}`;
+      document.getElementById("cook-step-badge").innerText = `${currentStep} / ${totalSteps} 단계`;
+
+      const step = s.current_step_detail;
+      if (step) {
+        document.getElementById("cook-step-instruction").innerText = step.instruction;
+        const warnEl = document.getElementById("cook-step-warning");
+        if (step.safety_warning) {
+          warnEl.style.display = "block";
+          warnEl.innerText = "⚠️ " + step.safety_warning;
+        } else {
+          warnEl.style.display = "none";
+        }
+
+        // 칼/화구 감시 배지 업데이트
+        const kBadge = document.getElementById("badge-knife");
+        const hBadge = document.getElementById("badge-heat");
+        kBadge.className = "h-badge" + (step.is_knife_monitoring ? " on" : "");
+        kBadge.innerText = `🔪 칼날감시 ${step.is_knife_monitoring ? 'ON' : 'OFF'}`;
+        hBadge.className = "h-badge" + (step.is_unattended_monitoring ? " on" : "");
+        hBadge.innerText = `🔥 화구감시 ${step.is_unattended_monitoring ? 'ON' : 'OFF'}`;
+
+        // 타이머 세팅
+        const tBox = document.getElementById("timer-box");
+        if (step.timer_seconds && step.timer_seconds > 0) {
+          timerSeconds = step.timer_seconds;
+          tBox.style.display = "flex";
+          updateTimerText();
+        } else {
+          tBox.style.display = "none";
+        }
+      }
+
+      const nextBtn = document.getElementById("next-or-finish-btn");
+      if (currentStep >= totalSteps) {
+        nextBtn.innerText = "🎉 요리 완료!";
+        nextBtn.onclick = finishCooking;
+      } else {
+        nextBtn.innerText = "다음 단계 ➡️";
+        nextBtn.onclick = () => changeStep("NEXT");
+      }
+    }
+
+    async function changeStep(action) {
+      if (!activeSessionId) {
+        alert("먼저 레시피 탭에서 [요리 시작하기]를 눌러주세요!");
+        switchTab("home");
+        return;
+      }
+      await fetch(`${API}/api/sessions/${activeSessionId}/step`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action })
+      });
+      await refreshSessionUI();
+    }
+
+    async function finishCooking() {
+      if (!activeSessionId) return;
+      const res = await fetch(`${API}/api/sessions/${activeSessionId}/complete`, { method: "POST" });
+      const report = await res.json();
+      const logsHtml = (report.safety_logs || []).map(l =>
+        `<li style="margin-bottom:6px; font-size:13px;">[${l.step_number}단계 / ${l.level}] ${l.message}</li>`
+      ).join("") || `<li style="color:var(--safe); font-size:13px;">위험 경고 없이 완벽하게 조리하셨습니다! 🎉</li>`;
+
+      document.getElementById("report-container").innerHTML = `
+        <h3 style="margin-bottom:10px;">${report.message}</h3>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px;">
+          <div style="background:#f8fafc; padding:12px; border-radius:12px; text-align:center;">
+            <div style="font-size:12px; color:var(--muted);">총 조리 시간</div>
+            <div style="font-size:20px; font-weight:800;">${report.total_cooking_seconds}초</div>
+          </div>
+          <div style="background:#fef2f2; padding:12px; border-radius:12px; text-align:center;">
+            <div style="font-size:12px; color:#991b1b;">안전 주의 발생</div>
+            <div style="font-size:20px; font-weight:800; color:#dc2626;">${report.total_warnings_count}회</div>
+          </div>
+        </div>
+        <h4 style="font-size:14px; margin-bottom:8px;">📋 안전 감지 상세 기록</h4>
+        <ul style="padding-left:18px;">${logsHtml}</ul>
+      `;
+      switchTab("report");
+    }
+
+    // 5. 타이머 기능
+    function updateTimerText() {
+      const m = String(Math.floor(timerSeconds / 60)).padStart(2, "0");
+      const s = String(timerSeconds % 60).padStart(2, "0");
+      document.getElementById("timer-display").innerText = `⏱️ ${m}:${s}`;
+    }
+    function toggleTimer() {
+      const btn = document.getElementById("timer-btn");
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+        btn.innerText = "타이머 재개";
+      } else {
+        btn.innerText = "일시정지";
+        timerInterval = setInterval(() => {
+          if (timerSeconds > 0) {
+            timerSeconds--;
+            updateTimerText();
+          } else {
+            clearInterval(timerInterval);
+            timerInterval = null;
+            playBeep(880, 0.4);
+            btn.innerText = "완료!";
+          }
+        }, 1000);
+      }
+    }
+
+    // 6. 위험 경고 비프음 (Web Audio API)
+    function playBeep(freq = 760, duration = 0.25) {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.value = freq;
+        gain.gain.value = 0.15;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        setTimeout(() => { osc.stop(); ctx.close(); }, duration * 1000);
+      } catch (e) {}
+    }
+
+    // 7. 비전 안전 UI 업데이트
+    function applyVisionState(status, msg) {
+      const shell = document.getElementById("app-shell");
+      const pill = document.getElementById("header-status-pill");
+      const banner = document.getElementById("safety-banner");
+      const bText = document.getElementById("safety-banner-text");
+
+      if (status === "DANGER") {
+        shell.classList.add("danger-flash");
+        pill.className = "status-pill danger";
+        pill.innerText = "🚨 위험 감지!";
+        banner.className = "alert-banner danger";
+        bText.innerText = msg || "🚨 [위험] 칼날과 손가락이 너무 가깝습니다! 고양이 손을 유지하세요!";
+        const now = Date.now();
+        if (now - lastDangerBeepAt > 2500) {
+          lastDangerBeepAt = now;
+          playBeep(820, 0.3);
+        }
+      } else if (status === "WARNING") {
+        shell.classList.remove("danger-flash");
+        pill.className = "status-pill warn";
+        pill.innerText = "⚠️ 주의";
+        banner.className = "alert-banner warn";
+        bText.innerText = msg || "⚠️ [주의] 칼날 근처에 손이 접근 중입니다.";
+      } else {
+        shell.classList.remove("danger-flash");
+        pill.className = "status-pill";
+        pill.innerText = "🛡️ 주방 안전";
+        banner.className = "alert-banner safe";
+        bText.innerText = "✅ 현재 주방은 안전합니다. 안심하고 조리하세요!";
+      }
+    }
+
+    // 주기적 비전 상태 폴링 (외부 step6_knifehand.py 연동 포함)
+    async function pollVisionStatus() {
+      try {
+        const r = await fetch(`${API}/api/vision/status`);
+        if (r.ok) {
+          const d = await r.json();
+          applyVisionState(d.status, d.message);
+        }
+      } catch (e) {}
+    }
+
+    // 8. 모바일/웹 자체 카메라 켜기 -> 60fps 실시간 비디오 유지 + 투명 캔버스 오버레이
+    function drawOverlay(overlay, data) {
+      const octx = overlay.getContext("2d");
+      overlay.width = data.frame_w || 320;
+      overlay.height = data.frame_h || 240;
+      octx.clearRect(0, 0, overlay.width, overlay.height);
+
+      // 1. 칼 다각형 그리기
+      if (data.blade_poly && data.blade_poly.length >= 3) {
+        octx.beginPath();
+        octx.moveTo(data.blade_poly[0][0], data.blade_poly[0][1]);
+        for (let i = 1; i < data.blade_poly.length; i++) {
+          octx.lineTo(data.blade_poly[i][0], data.blade_poly[i][1]);
+        }
+        octx.closePath();
+        octx.lineWidth = 3;
+        octx.strokeStyle = data.vision_status === "DANGER" ? "#ef4444" : (data.vision_status === "WARNING" ? "#facc15" : "#00e5ff");
+        octx.stroke();
+      }
+
+      // 2. 손 관절 점 그리기 (쥔 손: 초록, 보조 손: 빨강)
+      if (data.hands) {
+        for (const h of data.hands) {
+          octx.fillStyle = h.role === "grip" ? "#22c55e" : (h.role === "assist" ? "#ef4444" : "#e2e8f0");
+          for (const pt of h.pts) {
+            octx.beginPath();
+            octx.arc(pt[0], pt[1], 4, 0, Math.PI * 2);
+            octx.fill();
+          }
+        }
+      }
+
+      // 3. 가장 가까운 손끝-칼 거리 측정선 그리기
+      if (data.nearest_line && data.nearest_line.length === 2) {
+        const [p1, p2] = data.nearest_line;
+        octx.beginPath();
+        octx.moveTo(p1[0], p1[1]);
+        octx.lineTo(p2[0], p2[1]);
+        octx.lineWidth = 2.5;
+        octx.strokeStyle = "#facc15";
+        octx.stroke();
+
+        octx.beginPath();
+        octx.arc(p1[0], p1[1], 7, 0, Math.PI * 2);
+        octx.stroke();
+      }
+    }
+
+    async function toggleMobileCamera() {
+      const video = document.getElementById("raw-video");
+      const overlay = document.getElementById("overlay-canvas");
+      const ph = document.getElementById("cam-placeholder");
+      const btn = document.getElementById("cam-toggle-btn");
+      const badge = document.getElementById("cam-status-badge");
+
+      if (cameraStream) {
+        clearInterval(frameTimer);
+        frameTimer = null;
+        cameraStream.getTracks().forEach(t => t.stop());
+        cameraStream = null;
+        video.style.display = "none";
+        overlay.style.display = "none";
+        ph.style.display = "block";
+        btn.innerText = "📷 내 카메라 켜기";
+        badge.innerText = "📷 실시간 AI 비전 대기 중";
+        return;
+      }
+
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" }, width: { ideal: 480 }, height: { ideal: 360 } },
+          audio: false
+        });
+        video.srcObject = cameraStream;
+        ph.style.display = "none";
+        video.style.display = "block";
+        overlay.style.display = "block";
+        await video.play();
+        btn.innerText = "⏹️ 카메라 끄기";
+        badge.innerText = "🟢 AI 칼·손 실시간 감시 중";
+
+        const canvas = document.getElementById("capture-canvas");
+        const ctx = canvas.getContext("2d");
+        let busy = false;
+
+        frameTimer = setInterval(async () => {
+          if (busy || !cameraStream || video.videoWidth === 0) return;
+          busy = true;
+          try {
+            canvas.width = 320;
+            canvas.height = Math.round(video.videoHeight * (320 / video.videoWidth)) || 240;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.6));
+            const fd = new FormData();
+            fd.append("file", blob, "frame.jpg");
+            if (activeSessionId) fd.append("session_id", activeSessionId);
+
+            const resp = await fetch(`${API}/api/vision/detect`, { method: "POST", body: fd });
+            const data = await resp.json();
+            drawOverlay(overlay, data);
+            applyVisionState(data.vision_status, data.message);
+          } catch (e) {
+          } finally {
+            busy = false;
+          }
+        }, 180);
+      } catch (err) {
+        alert("카메라 권한을 허용해 주세요! (스마트폰에서는 https 주소 또는 localhost에서 카메라가 작동합니다)\n" + err);
+      }
+    }
+
+    // 9. 실시간 음성 대화 (핸즈프리 + 원터치 녹음)
+    async function toggleWakeWordSetting(enabled) {
+      try {
+        await fetch(`${API}/api/users/1/settings`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wake_word_enabled: enabled })
+        });
+      } catch (e) {}
+    }
+
+    async function sendVoiceTextToBackend(text) {
+      const tBox = document.getElementById("voice-transcript");
+      const rBox = document.getElementById("voice-ai-reply");
+      isAiSpeaking = true;
+      tBox.innerHTML = `🗣️ <b>내 질문:</b> "${text}" <span style="color:#38bdf8;">(답변 준비 중...)</span>`;
+
+      try {
+        const res = await fetch(`${API}/api/nlp/process-text`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, session_code: activeSessionCode, user_id: 1 })
+        });
+        const data = await res.json();
+        if (data.status === "success") {
+          if (data.session_id) activeSessionId = data.session_id;
+          if (data.session_code) activeSessionCode = data.session_code;
+          await refreshSessionUI();
+
+          rBox.style.display = "block";
+          rBox.innerHTML = `🤖 <b>YO-Cook ${data.intent}:</b><br/>${data.ai_response}`;
+          if (data.audio_base64) {
+            const audio = new Audio("data:audio/mp3;base64," + data.audio_base64);
+            audio.onended = () => { isAiSpeaking = false; };
+            await audio.play();
+          } else {
+            isAiSpeaking = false;
+          }
+        } else {
+          isAiSpeaking = false;
+        }
+      } catch (e) {
+        tBox.innerText = "통신 오류: " + e;
+        isAiSpeaking = false;
+      }
+    }
+
+    function toggleHandsFree() {
+      const btn = document.getElementById("handsfree-btn");
+      const wave = document.getElementById("voice-wave");
+      const tBox = document.getElementById("voice-transcript");
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+      if (handsFreeOn) {
+        handsFreeOn = false;
+        if (recognition) recognition.stop();
+        btn.className = "btn-voice off";
+        btn.innerText = "🟢 핸즈프리 연속 대화 켜기";
+        wave.classList.remove("listening");
+        return;
+      }
+
+      if (!SpeechRecognition) {
+        alert("이 브라우저는 상시 음성 인식을 지원하지 않습니다. 오른쪽 [🎤 3초 녹음 질문] 버튼을 사용해 주세요!");
+        return;
+      }
+
+      handsFreeOn = true;
+      btn.className = "btn-voice";
+      btn.innerText = "⏹️ 핸즈프리 대화 끄기 (듣는 중...)";
+      wave.classList.add("listening");
+
+      recognition = new SpeechRecognition();
+      recognition.lang = "ko-KR";
+      recognition.continuous = true;
+      recognition.interimResults = true;
+
+      recognition.onresult = (event) => {
+        if (isAiSpeaking) return;
+        let finalTxt = "";
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) finalTxt += event.results[i][0].transcript.trim();
+          else interim += event.results[i][0].transcript;
+        }
+        if (interim) tBox.innerText = "🎙️ 듣는 중: " + interim;
+        if (finalTxt) {
+          const requireWake = document.getElementById("wake-check").checked;
+          const wakeWords = ["요쿡아", "요쿠가", "요쿡", "요국아", "요코가", "여쿡아"];
+          if (requireWake && !wakeWords.some(w => finalTxt.includes(w))) {
+            tBox.innerText = `💤 ('요쿡아'를 붙여 말씀해 주세요) "${finalTxt}"`;
+            return;
+          }
+          sendVoiceTextToBackend(finalTxt);
+        }
+      };
+
+      recognition.onend = () => {
+        if (handsFreeOn) {
+          try { recognition.start(); } catch (e) {}
+        }
+      };
+      try { recognition.start(); } catch (e) {}
+    }
+
+    // Whisper STT 직접 녹음 전송 (모든 모바일/브라우저 100% 호환)
+    async function recordAudioClip() {
+      const btn = document.getElementById("record-once-btn");
+      const tBox = document.getElementById("voice-transcript");
+      const rBox = document.getElementById("voice-ai-reply");
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const recorder = new MediaRecorder(stream);
+        const chunks = [];
+        recorder.ondataavailable = e => chunks.push(e.data);
+        recorder.onstop = async () => {
+          stream.getTracks().forEach(t => t.stop());
+          btn.innerText = "⏳ Whisper 분석 중...";
+          const blob = new Blob(chunks, { type: "audio/webm" });
+          const fd = new FormData();
+          fd.append("file", blob, "voice.webm");
+          fd.append("session_code", activeSessionCode);
+
+          const res = await fetch(`${API}/api/nlp/process-audio`, { method: "POST", body: fd });
+          const data = await res.json();
+          btn.innerText = "🎤 3초 녹음 질문";
+          if (data.status === "success") {
+            if (data.session_id) activeSessionId = data.session_id;
+            if (data.session_code) activeSessionCode = data.session_code;
+            await refreshSessionUI();
+            tBox.innerHTML = `🗣️ <b>내 질문:</b> "${data.recognized_text}"`;
+            rBox.style.display = "block";
+            rBox.innerHTML = `🤖 <b>YO-Cook ${data.intent}:</b><br/>${data.ai_response}`;
+            if (data.audio_base64) {
+              new Audio("data:audio/mp3;base64," + data.audio_base64).play();
+            }
+          }
+        };
+        recorder.start();
+        btn.innerText = "🔴 말씀하세요 (3.5초)...";
+        setTimeout(() => recorder.stop(), 3500);
+      } catch (err) {
+        alert("마이크 권한을 허용해 주세요!\n" + err);
+      }
+    }
+
+    // 초기화
+    loadRecipes();
+    statusPollTimer = setInterval(pollVisionStatus, 1800);
+  </script>
+</body>
+</html>
