@@ -73,43 +73,54 @@ with col_right:
 
     # 2. NLP / 음성 섹션
     st.header("💬 AI 레시피 어시스턴트 (NLP/RAG)")
-    st.metric(label="현재 요리 단계", value=f"{st.session_state.current_step} 단계 진행 중")
-    st.info("음성 명령을 통해 다음 요리 단계나 대체 식재료를 질문해 보세요.")
     
-    uploaded_audio = st.file_uploader("음성 질문 파일 업로드 (.mp3, .wav)", type=["mp3", "wav"])
-    
-    if st.button("질문 전송", use_container_width=True):
-        if uploaded_audio is not None:
-            with st.spinner("AI가 답변을 준비 중입니다..."):
-                files = {"file": (uploaded_audio.name, uploaded_audio.getvalue(), uploaded_audio.type)}
-                data = {"session_code": st.session_state.session_code}
-                
-                try:
-                    response = requests.post("http://localhost:8000/api/nlp/process-audio", files=files, data=data)
+    # [신규 추가] 세션 상태에 오디오 활성화 여부 저장
+    if "audio_enabled" not in st.session_state:
+        st.session_state.audio_enabled = False
+
+    # 오디오가 활성화되지 않았다면 '시작 버튼'만 노출 (브라우저 최초 상호작용 유도)
+    if not st.session_state.audio_enabled:
+        st.info("💡 브라우저 정책상 핸즈프리 음성 안내를 위해 최초 1회 클릭이 필요합니다.")
+        if st.button("🍳 요리 시작 및 음성 안내 켜기", use_container_width=True, type="primary"):
+            st.session_state.audio_enabled = True
+            st.rerun() # 화면을 새로고침하여 아래 질문 UI를 노출합니다.
+            
+    # 오디오가 활성화된 이후부터 진짜 요리 UI 노출 (여기서부터 핸즈프리 시작)
+    else:
+        st.metric(label="현재 요리 단계", value=f"{st.session_state.current_step} 단계 진행 중")
+        st.info("음성 명령을 통해 다음 요리 단계나 대체 식재료를 질문해 보세요.")
+        
+        uploaded_audio = st.file_uploader("음성 질문 파일 업로드 (.mp3, .wav)", type=["mp3", "wav"])
+        
+        if st.button("질문 전송", use_container_width=True):
+            if uploaded_audio is not None:
+                with st.spinner("AI가 답변을 준비 중입니다..."):
+                    files = {"file": (uploaded_audio.name, uploaded_audio.getvalue(), uploaded_audio.type)}
+                    data = {"session_code": st.session_state.session_code}
                     
-                    if response.status_code == 200:
-                        result = response.json()
-                        if "current_step" in result:
-                            st.session_state.current_step = result["current_step"]
-                        if result.get("session_id"):
-                            st.session_state.active_session_id = result["session_id"]
-                        if result.get("session_code"):
-                            st.session_state.session_code = result["session_code"]
-                            
-                        st.success("분석 완료!")
-                        st.write(f"🗣️ **질문:** {result.get('recognized_text')}")
-                        st.write(f"🧠 **의도:** {result.get('intent')}")
-                        st.info(f"🤖 **답변:**\n\n{result.get('ai_response')}")
+                    try:
+                        response = requests.post("http://localhost:8000/api/nlp/process-audio", files=files, data=data)
                         
-                        if "audio_base64" in result:
-                            audio_bytes = base64.b64decode(result["audio_base64"])
-                            st.audio(audio_bytes, format="audio/mp3", autoplay=True)
-                    else:
-                        st.error(f"서버 에러가 발생했습니다. (상태 코드: {response.status_code})")
-                except Exception as e:
-                    st.error("백엔드 서버에 연결할 수 없습니다.\n에러 내용: " + str(e))
-        else:
-            st.warning("먼저 음성 파일을 업로드해 주세요.")
+                        if response.status_code == 200:
+                            result = response.json()
+                            if "current_step" in result:
+                                st.session_state.current_step = result["current_step"]
+                                
+                            st.success("분석 완료!")
+                            st.write(f"🗣️ **질문:** {result.get('recognized_text')}")
+                            st.write(f"🧠 **의도:** {result.get('intent')}")
+                            st.info(f"🤖 **답변:**\n\n{result.get('ai_response')}")
+                            
+                            if "audio_base64" in result:
+                                audio_bytes = base64.b64decode(result["audio_base64"])
+                                # 이미 위에서 버튼 클릭(상호작용)이 있었으므로 자동 재생이 차단될 확률이 크게 낮아집니다.
+                                st.audio(audio_bytes, format="audio/mp3", autoplay=True)
+                        else:
+                            st.error(f"서버 에러가 발생했습니다. (상태 코드: {response.status_code})")
+                    except Exception as e:
+                        st.error(f"백엔드 서버에 연결할 수 없습니다.\n에러 내용: {e}")
+            else:
+                st.warning("먼저 음성 파일을 업로드해 주세요.")
 
 # [좌측 영역] 레시피 가이드 (우측 음성 명령에 의한 단계 변경이 같은 화면 렌더링에 즉시 반영됨)
 with col_left:
