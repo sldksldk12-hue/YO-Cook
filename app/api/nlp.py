@@ -7,7 +7,7 @@ from io import BytesIO         # 오디오 파일을 메모리에서 바로 처�
 from gtts import gTTS          # 텍스트를 음성으로 변환하는 라이브러리
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers impo rt StrOutputParser
 from dotenv import load_dotenv
 
 # 기존 함수 대신 세션을 인식하는 새로운 RAG 함수 불러오기
@@ -95,3 +95,17 @@ from app.api.vision import get_current_vision_status
 def get_nlp_vision_status():
     """프론트엔드(app.py)의 실시간 위험 감지 토글에서 호출하는 비전 안전 상태 엔드포인트입니다."""
     return get_current_vision_status()
+
+
+@router.get("/vision-status")
+async def get_vision_status():
+    """
+    [임시 API] 프론트엔드에서 2초마다 호출하여 주방의 안전 상태를 확인
+    추후 희준님의 YOLOv8 판별 로직(SAFE, WARNING, DANGER) 결과값을 리턴하도록 수정
+    """
+    # 지금은 테스트를 위해 안전(SAFE) 상태를 기본으로 반환
+    # 테스트 시 이 값을 "DANGER"나 "WARNING"으로 바꿔서 프론트엔드를 테스트 가능
+    return {
+        "status": "SAFE", 
+        "message": "안전한 요리 환경입니다."
+    }
