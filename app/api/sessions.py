@@ -41,10 +41,12 @@ def start_cooking_session(
             detail=f"ID {payload.recipe_id}번에 해당하는 레시피를 찾을 수 없습니다."
         )
 
-    # 2. 기존에 종료되지 않은 미완료 세션이 있다면 자동 종료 처리 (중복 활성 세션 혼선 방지)
+    # 2. 해당 사용자의 기존 미완료 세션이 있다면 자동 종료 처리 (사용자별 독립 세션 보장)
     now = datetime.utcnow()
-    active_sessions = db.query(CookingSession).filter(CookingSession.is_completed == False).all()
-    for old_sess in active_sessions:
+    q = db.query(CookingSession).filter(CookingSession.is_completed == False)
+    if payload.user_id is not None:
+        q = q.filter(CookingSession.user_id == payload.user_id)
+    for old_sess in q.all():
         old_sess.is_completed = True
         old_sess.ended_at = now
 

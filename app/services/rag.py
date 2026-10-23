@@ -15,12 +15,19 @@ from app.models.recipe import Recipe
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BASE_DIR / ".env")
 
-def generate_session_aware_answer(user_question: str, intent: str, session_code: str) -> dict:
+def generate_session_aware_answer(user_question: str, intent: str, session_code: str, user_id: int = 1) -> dict:
     """세션 정보를 바탕으로 사용자의 현재 요리 단계를 추적하고 맞춤형 답변을 생성합니다."""
     db = SessionLocal()
     try:
-        # 1. 세션 조회 (지정된 session_code 우선 -> 없으면 현재 진행 중인 최신 활성 세션으로 폴백)
+        # 1. 세션 조회 (지정된 session_code 우선 -> 해당 user_id의 미완료 세션 -> 전체 미완료 세션 순으로 폴백)
         session = db.query(CookingSession).filter(CookingSession.session_code == session_code).first()
+        if not session:
+            session = (
+                db.query(CookingSession)
+                .filter(CookingSession.user_id == user_id, CookingSession.is_completed == False)
+                .order_by(desc(CookingSession.started_at))
+                .first()
+            )
         if not session:
             session = (
                 db.query(CookingSession)
@@ -36,6 +43,7 @@ def generate_session_aware_answer(user_question: str, intent: str, session_code:
             session = CookingSession(
                 session_code=session_code,
                 recipe_id=first_recipe.id,
+                user_id=user_id,
                 current_step=1,
                 is_completed=False,
                 calibration_status="VERIFIED"

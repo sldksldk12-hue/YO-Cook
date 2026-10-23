@@ -39,7 +39,7 @@ def toggle_recipe_favorite(
     # 2. 유저 존재 여부 확인 (없으면 기본 생성)
     user = db.get(User, payload.user_id)
     if not user:
-        user = User(id=payload.user_id, username=f"user_{payload.user_id}", nickname="스마트 요리사")
+        user = User(id=payload.user_id, username=f"user_{payload.user_id}", password="1234")
         db.add(user)
         db.commit()
 
