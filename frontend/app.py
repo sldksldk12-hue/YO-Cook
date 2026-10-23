@@ -5,7 +5,8 @@ import importlib
 import uuid
 import base64
 import hashlib
-import time  # [추가] 실시간 모니터링 대기 시간을 위해 임포트
+import time
+import cv2  # [추가] 실제 웹캠 프레임을 캡처하기 위해 OpenCV 임포트
 import api_client
 import recipe_viewer
 
@@ -39,7 +40,6 @@ if "wake_word" not in st.session_state:
     st.session_state.wake_word = "요쿡아"
 # ----------------------------------------
 
-
 def handle_voice_api_result(result: dict):
     """백엔드 음성/대화 API 응답을 받아 세션 단계 동기화 및 대화 히스토리에 저장합니다."""
     if result.get("status") != "success":
@@ -60,7 +60,6 @@ def handle_voice_api_result(result: dict):
         "audio_base64": result.get("audio_base64")
     })
 
-
 st.title("🍳 YO-Cook: 스마트 AI 쿠킹메이트")
 st.caption(f"AI 기반 실시간 비전 위험 감지 및 스마트 음성 요리 가이드 | 🔑 현재 세션: `{st.session_state.session_code}`")
 st.markdown("---")
@@ -73,48 +72,66 @@ with col_right:
     st.header("📷 실시간 주방 모니터링 (Vision)")
     st.info("웹캠 기반 실시간 객체 탐지(YOLOv8) 및 위험 상황 경고 화면이 연동됩니다.")
     
-    # 웹캠 스트리밍 임시 화면
-    st.image("https://via.placeholder.com/600x320?text=Webcam+Stream+Placeholder", width="stretch")
-
-    # [신규 추가] 실시간 위험 모니터링 스위치 및 경고 로직
     is_monitoring = st.toggle("🚨 실시간 위험 감지 켜기", value=False)
     
+    # 웹캠 화면과 경고 메시지를 업데이트할 빈 공간(Placeholder) 할당
+    vision_placeholder = st.empty()
+    alert_placeholder = st.empty()
+
     if is_monitoring:
-        # 백엔드 API에서 현재 안전 상태를 가져오기
-        try:
-            res = requests.get("http://localhost:8000/api/nlp/vision-status", timeout=2)
-            if res.status_code == 200:
-                vision_data = res.json()
-                current_status = vision_data.get("status", "SAFE")
+        # OpenCV로 0번(기본) 웹캠을 켭니다.
+        cap = cv2.VideoCapture(0)
+        
+        while is_monitoring:
+            ret, frame = cap.read()
+            if not ret:
+                alert_placeholder.error("웹캠을 찾을 수 없습니다. 카메라 연결을 확인해 주세요.")
+                break
                 
-                # 상태에 따른 UI 경고 표시
-                if current_status == "DANGER":
-                    st.error("🚨 [위험] 칼과 손이 너무 가깝거나 빈 화구가 켜져 있습니다! 즉시 확인하세요!", icon="🔥")
-                    st.toast("위험 상황 감지!", icon="🚨")
-                elif current_status == "WARNING":
-                    st.warning("⚠️ [주의] 위험 요인이 감지되었습니다. 조심하세요.", icon="⚠️")
-                else:
-                    st.success("✅ 현재 주방은 안전합니다.", icon="🛡️")
-        except Exception as e:
-            st.error("비전 서버와 연결할 수 없습니다.")
+            # 찍힌 프레임을 JPG 이미지로 변환 (백엔드 전송용)
+            _, buffer = cv2.imencode('.jpg', frame)
+            files = {"file": ("frame.jpg", buffer.tobytes(), "image/jpeg")}
             
-        # 2초 대기 후 화면을 자동으로 새로고침하여 지속적으로 상태를 체크
-        time.sleep(2)
-        st.rerun()
+            try:
+                # [수정] 희준님의 실제 비전 API(/api/vision/detect)로 이미지 프레임을 쏘고 판정 받기
+                res = requests.post("http://localhost:8000/api/vision/detect", files=files)
+                
+                if res.status_code == 200:
+                    vision_data = res.json()
+                    status = vision_data.get("vision_status", "SAFE")
+                    msg = vision_data.get("message", "안전합니다.")
+                    
+                    # 화면 출력을 위해 색상 변환 (BGR -> RGB)
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    vision_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
+                    
+                    # 상태에 따른 UI 경고 표시 
+                    if status == "DANGER":
+                        alert_placeholder.error(f"🚨 {msg}", icon="🔥")
+                    elif status == "WARNING":
+                        alert_placeholder.warning(f"⚠️ {msg}", icon="⚠️")
+                    else:
+                        alert_placeholder.success(f"✅ {msg}", icon="🛡️")
+            except Exception as e:
+                alert_placeholder.error("비전 서버와 연결할 수 없습니다.")
+                time.sleep(2)
+                
+        # 모니터링 토글을 끄면 웹캠 자원 해제
+        cap.release()
+    else:
+        vision_placeholder.image("https://via.placeholder.com/600x320?text=Webcam+Off", use_column_width=True)
+        alert_placeholder.empty()
 
     st.markdown("---")
 
     # 2. NLP / 음성 섹션
     st.header("💬 AI 레시피 어시스턴트 (NLP/RAG)")
 
-    # 오디오가 활성화되지 않았다면 '시작 버튼'만 노출 (브라우저 최초 상호작용 유도 - #YJ 병합)
     if not st.session_state.audio_enabled:
         st.info("💡 브라우저 정책상 핸즈프리 음성 안내를 위해 최초 1회 클릭이 필요합니다.")
         if st.button("🍳 요리 시작 및 음성 안내 켜기", use_container_width=True, type="primary"):
             st.session_state.audio_enabled = True
-            st.rerun()  # 화면을 새로고침하여 아래 질문 UI를 노출합니다.
-
-    # 오디오가 활성화된 이후부터 진짜 요리 UI 노출 (여기서부터 핸즈프리 시작)
+            st.rerun()
     else:
         top_c1, top_c2 = st.columns([1.2, 1])
         with top_c1:
@@ -257,7 +274,7 @@ with col_right:
             """
             components.html(hands_free_html, height=165)
 
-        # [모드 B] 원터치 실시간 마이크 대화 (말이 끝나면 전송 버튼 없이 즉시 자동 대화!)
+        # [모드 B] 원터치 실시간 마이크 대화
         live_audio = st.audio_input("🎤 마이크로 바로 말하기 (말이 끝나면 자동 전송됩니다)")
         if live_audio is not None:
             audio_bytes_raw = live_audio.getvalue()
@@ -287,7 +304,7 @@ with col_right:
                     audio_bytes = base64.b64decode(latest["audio_base64"])
                     st.audio(audio_bytes, format="audio/mp3", autoplay=True)
 
-        # [모드 C] 음성 질문 파일 업로드 (.mp3, .wav)
+        # [모드 C] 음성 질문 파일 업로드
         with st.expander("📂 음성 질문 파일 업로드 (.mp3, .wav)", expanded=False):
             uploaded_audio = st.file_uploader("음성 질문 파일 업로드 (.mp3, .wav)", type=["mp3", "wav"])
             if st.button("질문 전송", use_container_width=True):
@@ -298,7 +315,6 @@ with col_right:
                         
                         try:
                             response = requests.post("http://localhost:8000/api/nlp/process-audio", files=files, data=data)
-                            
                             if response.status_code == 200:
                                 handle_voice_api_result(response.json())
                                 st.rerun()
@@ -309,6 +325,6 @@ with col_right:
                 else:
                     st.warning("먼저 음성 파일을 업로드해 주세요.")
 
-# [좌측 영역] 레시피 가이드 (우측 음성 명령에 의한 단계 변경이 같은 화면 렌더링에 즉시 반영됨)
+# [좌측 영역] 레시피 가이드
 with col_left:
     selected_recipe_id = render_recipe_viewer()
