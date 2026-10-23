@@ -41,10 +41,19 @@ def start_cooking_session(
             detail=f"ID {payload.recipe_id}번에 해당하는 레시피를 찾을 수 없습니다."
         )
 
-    # 2. 고유 세션 코드 생성 (예: COOK-A1B2C3D4)
+    # 2. 해당 사용자의 기존 미완료 세션이 있다면 자동 종료 처리 (사용자별 독립 세션 보장)
+    now = datetime.utcnow()
+    q = db.query(CookingSession).filter(CookingSession.is_completed == False)
+    if payload.user_id is not None:
+        q = q.filter(CookingSession.user_id == payload.user_id)
+    for old_sess in q.all():
+        old_sess.is_completed = True
+        old_sess.ended_at = now
+
+    # 3. 고유 세션 코드 생성 (예: COOK-A1B2C3D4)
     session_code = f"COOK-{uuid.uuid4().hex[:8].upper()}"
 
-    # 3. CookingSession 레코드 생성
+    # 4. CookingSession 레코드 생성
     calibration_status = payload.calibration_status if payload.calibration_status else "VERIFIED"
     new_session = CookingSession(
         session_code=session_code,
@@ -53,7 +62,7 @@ def start_cooking_session(
         current_step=1,
         is_completed=False,
         calibration_status=calibration_status,
-        started_at=datetime.utcnow()
+        started_at=now
     )
     db.add(new_session)
     db.commit()

@@ -22,7 +22,7 @@ SQLALCHEMY_DATABASE_URL = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL
 # pool_recycle=3600: 1시간마다 커넥션 자동 갱신
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
-    echo=True,
+    echo=False,
     pool_pre_ping=True,
     pool_recycle=3600
 ) 
