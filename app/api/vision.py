@@ -1,11 +1,13 @@
 import time
 import math
+import json
 import base64
+import asyncio
 import urllib.request
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Literal, List
-from fastapi import APIRouter, UploadFile, File, Form, Depends
+from typing import Optional, Literal, List, Dict, Set
+from fastapi import APIRouter, UploadFile, File, Form, Depends, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
@@ -141,8 +143,8 @@ def _analyze_mobile_frame(frame_bgr):
         s = abs(np.dot(d, v))
         return abs(t) > 0.5 - end_frac and s < S / 2 + L * side_frac
 
-    # 1. 칼(또는 가위) 탐지
-    r = yolo_model(frame_bgr, imgsz=480, conf=0.22, verbose=False)[0]
+    # 1. 칼(또는 가위) 탐지 (imgsz=320으로 추론 속도 2배 가속)
+    r = yolo_model(frame_bgr, imgsz=320, conf=0.22, verbose=False)[0]
     blade = None
     if r.obb is not None:
         for poly, c, cls in zip(r.obb.xyxyxyxy.cpu().numpy(), r.obb.conf.tolist(), r.obb.cls.tolist()):
@@ -394,26 +396,247 @@ async def update_vision_status(
     }
 
 
-@router.post("/detect", summary="모바일/웹 카메라 실시간 프레임 비전 분석 API")
+# 사용자(user_id)별 실시간 카메라 미러링 버퍼 및 WebSocket 뷰어 연결 풀
+user_streams: Dict[int, dict] = {}
+mirror_viewers: Dict[int, Set[WebSocket]] = {}
+
+
+def _ensure_user_stream(uid: int) -> dict:
+    if uid not in user_streams:
+        user_streams[uid] = {
+            "updated_at": 0.0,
+            "status": "SAFE",
+            "message": "[안전] 현재 주방은 안전합니다.",
+            "frame_b64": None,
+            "frame_w": 320,
+            "frame_h": 240,
+            "blade_poly": None,
+            "hands": [],
+            "nearest_line": None,
+            "session_id": None,
+            "current_step": 1,
+            "db_checked_at": 0.0,
+        }
+    return user_streams[uid]
+
+
+async def _broadcast_to_viewers(uid: int, payload: dict):
+    """동일 user_id로 접속 중인 모든 PC/뷰어 WebSocket에 프레임 또는 오버레이 좌표를 즉시 푸시합니다."""
+    viewers = mirror_viewers.get(uid)
+    if not viewers:
+        return
+    dead = []
+    msg_text = json.dumps(payload, ensure_ascii=False)
+    for ws in list(viewers):
+        try:
+            await ws.send_text(msg_text)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        viewers.discard(ws)
+
+
+@router.websocket("/ws/mirror/{user_id}")
+async def ws_user_mirror(websocket: WebSocket, user_id: int, role: str = "viewer"):
+    """
+    초고속(20~30fps) 실시간 영상 및 AI 오버레이 미러링 전용 WebSocket:
+    - role=sender (휴대폰): 카메라 JPEG 프레임(Base64)을 YOLO 대기 없이 50~60ms마다 즉시 전송
+    - role=viewer (PC 홈페이지): 휴대폰이 보내는 영상 프레임과 AI 칼·손 좌표를 지연 없이 실시간 수신
+    """
+    await websocket.accept()
+    uid = user_id or 1
+    stream = _ensure_user_stream(uid)
+
+    if role == "viewer":
+        if uid not in mirror_viewers:
+            mirror_viewers[uid] = set()
+        mirror_viewers[uid].add(websocket)
+        try:
+            # 접속 직후 현재 스트림 상태 즉시 1회 전송
+            now = time.time()
+            if stream.get("frame_b64") and (now - stream.get("updated_at", 0) < 3.5):
+                await websocket.send_text(json.dumps({
+                    "type": "FULL",
+                    "is_streaming": True,
+                    "frame_b64": stream["frame_b64"],
+                    "frame_w": stream["frame_w"],
+                    "frame_h": stream["frame_h"],
+                    "status": stream["status"],
+                    "message": stream["message"],
+                    "blade_poly": stream["blade_poly"],
+                    "hands": stream["hands"],
+                    "nearest_line": stream["nearest_line"],
+                    "active_session_id": stream.get("session_id"),
+                    "current_step": stream.get("current_step", 1),
+                }, ensure_ascii=False))
+            while True:
+                # 뷰어 연결 유지용 수신 대기
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            pass
+        finally:
+            if uid in mirror_viewers:
+                mirror_viewers[uid].discard(websocket)
+    else:
+        # role=sender (휴대폰 카메라 송신기)
+        try:
+            while True:
+                raw_msg = await websocket.receive_text()
+                data = json.loads(raw_msg)
+                if data.get("type") == "STOP":
+                    stream["updated_at"] = 0.0
+                    await _broadcast_to_viewers(uid, {"type": "STOP", "is_streaming": False})
+                    continue
+
+                frame_b64 = data.get("frame_b64")
+                if frame_b64:
+                    stream["updated_at"] = time.time()
+                    stream["frame_b64"] = frame_b64
+                    if data.get("frame_w"):
+                        stream["frame_w"] = data["frame_w"]
+                    if data.get("frame_h"):
+                        stream["frame_h"] = data["frame_h"]
+                    if data.get("session_id"):
+                        stream["session_id"] = data["session_id"]
+
+                    # PC 뷰어들에게 지연 없이 즉시 영상 프레임 + 최신 AI 오버레이 브로드캐스트
+                    await _broadcast_to_viewers(uid, {
+                        "type": "FRAME",
+                        "is_streaming": True,
+                        "frame_b64": frame_b64,
+                        "frame_w": stream["frame_w"],
+                        "frame_h": stream["frame_h"],
+                        "status": stream["status"],
+                        "message": stream["message"],
+                        "blade_poly": stream["blade_poly"],
+                        "hands": stream["hands"],
+                        "nearest_line": stream["nearest_line"],
+                        "active_session_id": stream.get("session_id"),
+                        "current_step": stream.get("current_step", 1),
+                    })
+        except WebSocketDisconnect:
+            stream["updated_at"] = 0.0
+            await _broadcast_to_viewers(uid, {"type": "STOP", "is_streaming": False})
+        except Exception:
+            pass
+
+
+@router.post("/push-frame", summary="초경량 실시간 영상 프레임 전용 푸시 (AI 추론 대기 없음)")
+async def push_live_frame(
+    file: UploadFile = File(...),
+    user_id: Optional[int] = Form(1),
+    session_id: Optional[int] = Form(None),
+    frame_w: Optional[int] = Form(320),
+    frame_h: Optional[int] = Form(240),
+):
+    """WebSocket 연결이 제한된 환경에서도 AI 추론 대기 없이 영상 프레임만 즉시 중계합니다."""
+    raw_bytes = await file.read()
+    uid = user_id or 1
+    stream = _ensure_user_stream(uid)
+    b64 = base64.b64encode(raw_bytes).decode("utf-8")
+    stream["updated_at"] = time.time()
+    stream["frame_b64"] = b64
+    stream["frame_w"] = frame_w or 320
+    stream["frame_h"] = frame_h or 240
+    if session_id:
+        stream["session_id"] = session_id
+
+    await _broadcast_to_viewers(uid, {
+        "type": "FRAME",
+        "is_streaming": True,
+        "frame_b64": b64,
+        "frame_w": stream["frame_w"],
+        "frame_h": stream["frame_h"],
+        "status": stream["status"],
+        "message": stream["message"],
+        "blade_poly": stream["blade_poly"],
+        "hands": stream["hands"],
+        "nearest_line": stream["nearest_line"],
+        "active_session_id": stream.get("session_id"),
+        "current_step": stream.get("current_step", 1),
+    })
+    return {"ok": True}
+
+
+@router.get("/mirror", summary="동일 로그인 사용자의 휴대폰 카메라 및 조리 상태 PC 실시간 미러링")
+def get_user_live_mirror(
+    user_id: int = 1,
+    db: Session = Depends(get_db)
+):
+    """
+    같은 아이디(user_id)로 로그인한 다른 기기(PC 등)에서 휴대폰이 촬영 중인 실시간 영상,
+    AI 칼/손 인식 좌표, 그리고 현재 요리 진행 단계를 실시간으로 함께 볼 수 있게 반환합니다.
+    """
+    now = time.time()
+    stream = _ensure_user_stream(user_id)
+    is_streaming = bool(stream.get("frame_b64") and (now - stream.get("updated_at", 0) < 3.5))
+
+    # DB 세션 조회는 1.5초에 최대 1회만 수행하여 프레임 조회 속도를 극대화
+    if now - stream.get("db_checked_at", 0) > 1.5:
+        stream["db_checked_at"] = now
+        active_sess = (
+            db.query(CookingSession)
+            .filter(CookingSession.user_id == user_id, CookingSession.is_completed == False)
+            .order_by(desc(CookingSession.started_at))
+            .first()
+        )
+        if active_sess:
+            stream["session_id"] = active_sess.id
+            stream["current_step"] = active_sess.current_step
+
+    if not is_streaming:
+        return {
+            "is_streaming": False,
+            "status": "SAFE",
+            "message": "[안전] 현재 주방은 안전합니다.",
+            "active_session_id": stream.get("session_id"),
+            "current_step": stream.get("current_step", 1),
+        }
+
+    return {
+        "is_streaming": True,
+        "status": stream["status"],
+        "message": stream["message"],
+        "frame_b64": stream["frame_b64"],
+        "frame_w": stream["frame_w"],
+        "frame_h": stream["frame_h"],
+        "blade_poly": stream["blade_poly"],
+        "hands": stream["hands"],
+        "nearest_line": stream["nearest_line"],
+        "active_session_id": stream.get("session_id"),
+        "current_step": stream.get("current_step", 1),
+    }
+
+
+@router.post("/detect", summary="모바일/웹 카메라 실시간 프레임 비전 분석 API (백그라운드 스레드 실행)")
 async def detect_objects(
     file: UploadFile = File(...),
     session_id: Optional[int] = Form(None),
+    user_id: Optional[int] = Form(1),
     db: Session = Depends(get_db)
 ):
     """
     모바일 앱(또는 웹캠)으로부터 실시간 프레임을 받아 step6 알고리즘(YOLO + MediaPipe Hands)으로
-    칼 다각형과 고양이손 위험 여부를 판별하고, 오버레이된 이미지(Base64)와 위험 상태를 반환합니다.
+    칼 다각형과 고양이손 위험 여부를 판별합니다.
+    * 무거운 YOLO/MediaPipe 추론을 별도 워커 스레드(asyncio.to_thread)에서 실행하여 영상 미러링 프레임이 절대 끊기지 않도록 보장합니다.
     """
     import cv2
     import numpy as np
 
     raw_bytes = await file.read()
-    arr = np.frombuffer(raw_bytes, np.uint8)
-    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if frame is None:
-        return {"status": "error", "message": "유효하지 않은 이미지 프레임입니다."}
 
-    analysis = _analyze_mobile_frame(frame)
+    def _decode_and_analyze(b: bytes):
+        arr = np.frombuffer(b, np.uint8)
+        frm = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if frm is None:
+            return None
+        return _analyze_mobile_frame(frm)
+
+    analysis = await asyncio.to_thread(_decode_and_analyze, raw_bytes)
+    if analysis is None:
+        return {"status": "error", "message": "유효하지 않은 이미지 프레임입니다."}
 
     # 상태 업데이트 및 디바운싱 DB 로깅 연동
     report = VisionStatusReport(
@@ -424,6 +647,35 @@ async def detect_objects(
         session_id=session_id
     )
     status_res = await update_vision_status(report, db)
+
+    # 최신 AI 좌표 및 위험 상태를 사용자 스트림 버퍼에 갱신 후 PC 뷰어들에게 즉시 브로드캐스트
+    uid = user_id or 1
+    stream = _ensure_user_stream(uid)
+    stream["updated_at"] = time.time()
+    stream["status"] = analysis["status"]
+    stream["message"] = vision_state["message"]
+    stream["frame_b64"] = base64.b64encode(raw_bytes).decode("utf-8")
+    stream["frame_w"] = analysis["frame_w"]
+    stream["frame_h"] = analysis["frame_h"]
+    stream["blade_poly"] = analysis["blade_poly"]
+    stream["hands"] = analysis["hands"]
+    stream["nearest_line"] = analysis["nearest_line"]
+    if session_id:
+        stream["session_id"] = session_id
+
+    await _broadcast_to_viewers(uid, {
+        "type": "OVERLAY",
+        "is_streaming": True,
+        "status": stream["status"],
+        "message": stream["message"],
+        "frame_w": stream["frame_w"],
+        "frame_h": stream["frame_h"],
+        "blade_poly": stream["blade_poly"],
+        "hands": stream["hands"],
+        "nearest_line": stream["nearest_line"],
+        "active_session_id": stream.get("session_id"),
+        "current_step": status_res.get("current_step", 1),
+    })
 
     return {
         "status": "success",

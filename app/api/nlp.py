@@ -102,7 +102,7 @@ def _build_voice_response(recognized_text: str, session_code: str, db: Session, 
         session_id = None
     else:
         intent = classify_user_intent(query_text)
-        rag_result = generate_session_aware_answer(query_text, intent, session_code)
+        rag_result = generate_session_aware_answer(query_text, intent, session_code, user_id=user_id)
         ai_response_text = rag_result["answer"]
         current_step = rag_result["current_step"]
         session_id = rag_result.get("session_id")
@@ -136,6 +136,7 @@ def _build_voice_response(recognized_text: str, session_code: str, db: Session, 
 async def process_audio(
     file: UploadFile = File(...),
     session_code: str = Form(...),  # 클라이언트로부터 세션 방 번호 받기
+    user_id: Optional[int] = Form(1),
     db: Session = Depends(get_db)
 ):
     """클라이언트로부터 실시간 마이크 음성(또는 오디오 파일)을 받아 STT, 의도 분석, 세션 맞춤형 답변(RAG) 및 TTS 음성을 반환합니다."""
@@ -149,7 +150,7 @@ async def process_audio(
         # 1. 음성 인식 (STT)
         result = whisper_model.transcribe(temp_file_path, language="ko")
         recognized_text = result["text"].strip()
-        return _build_voice_response(recognized_text, session_code, db)
+        return _build_voice_response(recognized_text, session_code, db, user_id=user_id or 1)
     except Exception as e:
         return {"status": "error", "message": str(e)}
     finally:

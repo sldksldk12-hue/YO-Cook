@@ -82,6 +82,51 @@
     .status-pill.warn { background: #fffbeb; color: #b45309; border-color: #fde68a; }
     .status-pill.danger { background: #fef2f2; color: #b91c1c; border-color: #fecaca; animation: pulse 0.8s infinite; }
 
+    /* 상단 유저 배지 및 로그인/회원가입 모달 */
+    .user-pill {
+      font-size: 12px;
+      font-weight: 700;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: #f1f5f9;
+      color: #0f172a;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .user-pill:active { transform: scale(0.96); }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.65);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 20px;
+    }
+    .modal-backdrop.open { display: flex; }
+    .auth-card {
+      width: 100%;
+      max-width: 360px;
+      background: var(--card);
+      border-radius: 20px;
+      padding: 22px 20px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.35);
+    }
+    .auth-input {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      font-size: 14px;
+      margin-bottom: 10px;
+      background: #f8fafc;
+    }
+
     /* 화면 섹션 */
     .screen { display: none; padding: 14px; flex-direction: column; gap: 14px; }
     .screen.active { display: flex; }
@@ -407,8 +452,34 @@
     <!-- 상단 앱 바 -->
     <header class="app-header">
       <div class="brand">🍳 YO-Cook</div>
-      <div class="status-pill" id="header-status-pill">🛡️ 주방 안전</div>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <button class="user-pill" id="header-user-btn" onclick="openAuthModal()" title="클릭하여 로그인/계정 전환">
+          👤 <span id="header-username">yocook_user</span>
+        </button>
+        <div class="status-pill" id="header-status-pill">🛡️ 주방 안전</div>
+      </div>
     </header>
+
+    <!-- 로그인 / 회원가입 모달 (동일 아이디 휴대폰-PC 실시간 세션 & 카메라 연동) -->
+    <div class="modal-backdrop" id="auth-modal">
+      <div class="auth-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <h3 style="font-size:18px;">👤 계정 로그인 · 회원가입</h3>
+          <button onclick="closeAuthModal()" style="border:none; background:none; font-size:18px; cursor:pointer; color:var(--muted);">✕</button>
+        </div>
+        <p style="font-size:12px; color:var(--muted); line-height:1.45; margin-bottom:14px;">
+          💡 <b>휴대폰과 PC에서 같은 아이디로 로그인</b>하면,<br/>
+          휴대폰으로 찍는 칼·손 AI 감지 화면과 조리 단계가 PC 화면에도 실시간으로 함께 노출됩니다!
+        </p>
+        <input type="text" id="auth-username" class="auth-input" placeholder="아이디 입력 (화면에 표시될 ID)" autocomplete="username" />
+        <input type="password" id="auth-password" class="auth-input" placeholder="비밀번호 입력" autocomplete="current-password" />
+        <div id="auth-msg" style="font-size:12px; color:var(--danger); margin-bottom:10px; display:none;"></div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <button class="btn-primary" style="padding:12px; font-size:14px;" onclick="submitAuth('login')">🔑 로그인</button>
+          <button class="btn-sec" style="padding:12px; font-size:14px; background:#fff7ed; color:var(--primary); border-color:#fed7aa;" onclick="submitAuth('register')">✨ 회원가입</button>
+        </div>
+      </div>
+    </div>
 
     <!-- [탭 1] 홈: 레시피 탐색 및 요리 시작 -->
     <section class="screen active" id="screen-home">
@@ -439,19 +510,20 @@
         <span id="safety-banner-text">현재 주방은 안전합니다. 안심하고 조리하세요!</span>
       </div>
 
-      <!-- 2. 실시간 카메라 뷰어 (모바일 자체 카메라 분석 or 외부 step6 연동) -->
+      <!-- 2. 실시간 카메라 뷰어 (모바일 자체 카메라 분석 or 동일 아이디 PC 실시간 미러링) -->
       <div class="vision-box">
         <div class="vision-overlay-top">
           <span class="cam-badge" id="cam-status-badge">📷 실시간 AI 비전 대기 중</span>
           <button class="cam-btn" id="cam-toggle-btn" onclick="toggleMobileCamera()">📷 내 카메라 켜기</button>
         </div>
         <video id="raw-video" autoplay playsinline muted style="display:none; width:100%; height:100%; object-fit:cover;"></video>
+        <img id="mirror-video" alt="휴대폰 실시간 미러링" style="display:none; width:100%; height:100%; object-fit:cover;" />
         <canvas id="capture-canvas" style="display:none;"></canvas>
         <canvas id="overlay-canvas" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
         <div id="cam-placeholder" style="text-align:center; padding:20px;">
           <div style="font-size:32px; margin-bottom:6px;">🔪 + 🤚</div>
           <div style="font-size:13px;"><b>[내 카메라 켜기]</b>를 누르면 스마트폰 카메라로<br/>칼날과 손가락 거리를 실시간 감시합니다.</div>
-          <div style="font-size:11px; margin-top:4px; opacity:0.75;">(PC에서 step6_knifehand.py 실행 시에도 자동 연동됩니다)</div>
+          <div style="font-size:11px; margin-top:4px; opacity:0.8; color:#38bdf8;">(같은 아이디로 로그인한 휴대폰에서 카메라를 켜면 이 화면에도 실시간 영상이 자동 노출됩니다)</div>
         </div>
       </div>
 
@@ -535,6 +607,8 @@
 
   <script>
     const API = window.location.origin;
+    let currentUserId = parseInt(localStorage.getItem("yocook_user_id") || "1", 10);
+    let currentUsername = localStorage.getItem("yocook_username") || "yocook_user";
     let currentFilter = "전체";
     let activeSessionId = null;
     let activeSessionCode = "COOK-MOBILE";
@@ -546,13 +620,84 @@
     // 카메라 & 비전 상태
     let cameraStream = null;
     let frameTimer = null;
+    let streamTimer = null;
+    let senderWs = null;
+    let viewerWs = null;
+    let lastWsFrameAt = 0;
     let statusPollTimer = null;
+    let mirrorPollTimer = null;
+    let mirrorBusy = false;
     let lastDangerBeepAt = 0;
 
     // 음성 인식 상태
     let recognition = null;
     let handsFreeOn = false;
     let isAiSpeaking = false;
+
+    // 0. 사용자 인증 (아이디 + 비밀번호 로그인/회원가입 및 기기 간 세션 자동 동기화)
+    function updateHeaderUserUI() {
+      document.getElementById("header-username").innerText = currentUsername;
+    }
+
+    function openAuthModal() {
+      document.getElementById("auth-username").value = currentUsername === "yocook_user" ? "" : currentUsername;
+      document.getElementById("auth-password").value = "";
+      document.getElementById("auth-msg").style.display = "none";
+      document.getElementById("auth-modal").classList.add("open");
+    }
+
+    function closeAuthModal() {
+      document.getElementById("auth-modal").classList.remove("open");
+    }
+
+    async function submitAuth(mode) {
+      const uname = document.getElementById("auth-username").value.trim();
+      const pw = document.getElementById("auth-password").value.trim();
+      const msgEl = document.getElementById("auth-msg");
+
+      if (!uname || !pw) {
+        msgEl.style.display = "block";
+        msgEl.innerText = "아이디와 비밀번호를 모두 입력해 주세요.";
+        return;
+      }
+
+      try {
+        const endpoint = mode === "register" ? "/api/users/register" : "/api/users/login";
+        const res = await fetch(`${API}${endpoint}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: uname, password: pw })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          msgEl.style.display = "block";
+          msgEl.innerText = data.detail || "오류가 발생했습니다.";
+          return;
+        }
+
+        currentUserId = data.user_id;
+        currentUsername = data.username;
+        localStorage.setItem("yocook_user_id", String(currentUserId));
+        localStorage.setItem("yocook_username", currentUsername);
+        document.getElementById("wake-check").checked = data.wake_word_enabled !== false;
+        updateHeaderUserUI();
+        closeAuthModal();
+        connectViewerWs();
+
+        // 동일 아이디로 다른 기기(휴대폰/PC)에서 진행 중인 요리 세션이 있으면 자동 연동!
+        if (data.active_session_id) {
+          activeSessionId = data.active_session_id;
+          activeSessionCode = data.active_session_code || "COOK-MOBILE";
+          await refreshSessionUI();
+          switchTab("cook");
+        } else {
+          loadRecipes();
+        }
+      } catch (e) {
+        msgEl.style.display = "block";
+        msgEl.innerText = "서버 통신 오류: " + e;
+      }
+    }
 
     // 1. 탭 전환
     function switchTab(tab) {
@@ -576,7 +721,7 @@
       try {
         let recipes = [];
         if (currentFilter === "찜") {
-          const r = await fetch(`${API}/api/favorites/users/1/favorites`);
+          const r = await fetch(`${API}/api/favorites/users/${currentUserId}/favorites`);
           const data = await r.json();
           recipes = data.recipes || [];
           if (kw) recipes = recipes.filter(x => x.title.includes(kw));
@@ -617,7 +762,7 @@
       const box = document.getElementById("recipe-preview-box");
       const [detailRes, favRes] = await Promise.all([
         fetch(`${API}/api/recipes/${recipeId}`),
-        fetch(`${API}/api/favorites/recipes/${recipeId}/favorite-status?user_id=1`)
+        fetch(`${API}/api/favorites/recipes/${recipeId}/favorite-status?user_id=${currentUserId}`)
       ]);
       const d = await detailRes.json();
       const fav = await favRes.json();
@@ -646,7 +791,7 @@
       await fetch(`${API}/api/favorites/recipes/${recipeId}/favorite`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: 1 })
+        body: JSON.stringify({ user_id: currentUserId })
       });
       openRecipePreview(recipeId);
     }
@@ -655,7 +800,7 @@
       const res = await fetch(`${API}/api/sessions/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ recipe_id: recipeId, user_id: 1, calibration_status: "VERIFIED" })
+        body: JSON.stringify({ recipe_id: recipeId, user_id: currentUserId, calibration_status: "VERIFIED" })
       });
       const sess = await res.json();
       activeSessionId = sess.id;
@@ -835,6 +980,7 @@
 
     // 주기적 비전 상태 폴링 (외부 step6_knifehand.py 연동 포함)
     async function pollVisionStatus() {
+      if (cameraStream) return;
       try {
         const r = await fetch(`${API}/api/vision/status`);
         if (r.ok) {
@@ -842,6 +988,92 @@
           applyVisionState(d.status, d.message);
         }
       } catch (e) {}
+    }
+
+    // 동일 아이디로 로그인한 다른 기기(예: 휴대폰 촬영 -> PC 화면) 실시간 미러링 렌더링
+    async function applyMirrorPayload(d) {
+      if (cameraStream) return;
+
+      if (d.active_session_id && (d.active_session_id !== activeSessionId || (d.current_step && d.current_step !== currentStep))) {
+        activeSessionId = d.active_session_id;
+        refreshSessionUI();
+      }
+
+      const mirrorImg = document.getElementById("mirror-video");
+      const overlay = document.getElementById("overlay-canvas");
+      const ph = document.getElementById("cam-placeholder");
+      const badge = document.getElementById("cam-status-badge");
+
+      if (d.type === "STOP" || d.is_streaming === false) {
+        if (mirrorImg.style.display === "block") {
+          mirrorImg.style.display = "none";
+          overlay.style.display = "none";
+          ph.style.display = "block";
+          badge.innerText = "📷 실시간 AI 비전 대기 중";
+        }
+        return;
+      }
+
+      if (d.frame_b64) {
+        ph.style.display = "none";
+        mirrorImg.style.display = "block";
+        overlay.style.display = "block";
+        mirrorImg.src = "data:image/jpeg;base64," + d.frame_b64;
+        badge.innerText = `📡 [${currentUsername}] 휴대폰 카메라 실시간 공유 중`;
+      }
+
+      if (d.blade_poly !== undefined || d.hands !== undefined) {
+        drawOverlay(overlay, {
+          frame_w: d.frame_w,
+          frame_h: d.frame_h,
+          blade_poly: d.blade_poly,
+          hands: d.hands,
+          nearest_line: d.nearest_line,
+          vision_status: d.status
+        });
+      }
+      if (d.status) {
+        applyVisionState(d.status, d.message);
+      }
+    }
+
+    // 초고속 WebSocket 미러링 뷰어 연결 (PC 홈페이지에서 20fps 무지연 수신)
+    function connectViewerWs() {
+      if (viewerWs) {
+        try { viewerWs.onclose = null; viewerWs.close(); } catch (e) {}
+        viewerWs = null;
+      }
+      try {
+        const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = `${wsProto}//${window.location.host}/api/vision/ws/mirror/${currentUserId}?role=viewer`;
+        viewerWs = new WebSocket(wsUrl);
+        viewerWs.onmessage = (ev) => {
+          lastWsFrameAt = Date.now();
+          try {
+            const d = JSON.parse(ev.data);
+            applyMirrorPayload(d);
+          } catch (e) {}
+        };
+        viewerWs.onclose = () => {
+          setTimeout(() => { if (!cameraStream) connectViewerWs(); }, 2000);
+        };
+      } catch (e) {}
+    }
+
+    // HTTP 폴백 미러링 (WebSocket으로 프레임을 받고 있을 때는 자동 생략)
+    async function pollMirrorStream() {
+      if (cameraStream || mirrorBusy) return;
+      if (Date.now() - lastWsFrameAt < 1500) return; // WebSocket 스트리밍 중이면 폴링 생략
+      mirrorBusy = true;
+      try {
+        const r = await fetch(`${API}/api/vision/mirror?user_id=${currentUserId}`);
+        if (!r.ok) return;
+        const d = await r.json();
+        await applyMirrorPayload(d);
+      } catch (e) {
+      } finally {
+        mirrorBusy = false;
+      }
     }
 
     // 8. 모바일/웹 자체 카메라 켜기 -> 60fps 실시간 비디오 유지 + 투명 캔버스 오버레이
@@ -894,6 +1126,7 @@
 
     async function toggleMobileCamera() {
       const video = document.getElementById("raw-video");
+      const mirrorImg = document.getElementById("mirror-video");
       const overlay = document.getElementById("overlay-canvas");
       const ph = document.getElementById("cam-placeholder");
       const btn = document.getElementById("cam-toggle-btn");
@@ -901,7 +1134,18 @@
 
       if (cameraStream) {
         clearInterval(frameTimer);
+        clearInterval(streamTimer);
         frameTimer = null;
+        streamTimer = null;
+        if (senderWs) {
+          try {
+            if (senderWs.readyState === WebSocket.OPEN) {
+              senderWs.send(JSON.stringify({ type: "STOP" }));
+            }
+            senderWs.close();
+          } catch (e) {}
+          senderWs = null;
+        }
         cameraStream.getTracks().forEach(t => t.stop());
         cameraStream = null;
         video.style.display = "none";
@@ -918,20 +1162,67 @@
           audio: false
         });
         video.srcObject = cameraStream;
+        mirrorImg.style.display = "none";
         ph.style.display = "none";
         video.style.display = "block";
         overlay.style.display = "block";
         await video.play();
         btn.innerText = "⏹️ 카메라 끄기";
-        badge.innerText = "🟢 AI 칼·손 실시간 감시 중";
+        badge.innerText = `🟢 [${currentUsername}] AI 칼·손 실시간 감시 중`;
+
+        // 1) PC 홈페이지 미러링용 초고속 WebSocket 송신 채널 오픈 (AI 추론 대기 없이 약 18~20 FPS 전송)
+        try {
+          const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+          senderWs = new WebSocket(`${wsProto}//${window.location.host}/api/vision/ws/mirror/${currentUserId}?role=sender`);
+        } catch (e) {}
 
         const canvas = document.getElementById("capture-canvas");
         const ctx = canvas.getContext("2d");
-        let busy = false;
+        let aiBusy = false;
+        let pushBusy = false;
 
+        // [루프 A] 실시간 영상 미러링 전용 루프 (55ms 간격 = 약 18 FPS, YOLO 대기 전혀 없음!)
+        streamTimer = setInterval(async () => {
+          if (!cameraStream || video.videoWidth === 0) return;
+          canvas.width = 320;
+          canvas.height = Math.round(video.videoHeight * (320 / video.videoWidth)) || 240;
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+          if (senderWs && senderWs.readyState === WebSocket.OPEN) {
+            // WebSocket 버퍼가 밀려있지 않을 때만 즉시 전송 (지연 누적 원천 차단)
+            if (senderWs.bufferedAmount < 120000) {
+              const dataUrl = canvas.toDataURL("image/jpeg", 0.55);
+              const b64 = dataUrl.substring(dataUrl.indexOf(",") + 1);
+              senderWs.send(JSON.stringify({
+                type: "FRAME",
+                frame_b64: b64,
+                frame_w: canvas.width,
+                frame_h: canvas.height,
+                session_id: activeSessionId
+              }));
+            }
+          } else if (!pushBusy) {
+            pushBusy = true;
+            try {
+              const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.55));
+              const fd = new FormData();
+              fd.append("file", blob, "f.jpg");
+              fd.append("user_id", currentUserId);
+              fd.append("frame_w", canvas.width);
+              fd.append("frame_h", canvas.height);
+              if (activeSessionId) fd.append("session_id", activeSessionId);
+              await fetch(`${API}/api/vision/push-frame`, { method: "POST", body: fd });
+            } catch (e) {
+            } finally {
+              pushBusy = false;
+            }
+          }
+        }, 55);
+
+        // [루프 B] AI 칼·손 비전 분석 전용 루프 (백그라운드 독립 실행)
         frameTimer = setInterval(async () => {
-          if (busy || !cameraStream || video.videoWidth === 0) return;
-          busy = true;
+          if (aiBusy || !cameraStream || video.videoWidth === 0) return;
+          aiBusy = true;
           try {
             canvas.width = 320;
             canvas.height = Math.round(video.videoHeight * (320 / video.videoWidth)) || 240;
@@ -939,6 +1230,7 @@
             const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.6));
             const fd = new FormData();
             fd.append("file", blob, "frame.jpg");
+            fd.append("user_id", currentUserId);
             if (activeSessionId) fd.append("session_id", activeSessionId);
 
             const resp = await fetch(`${API}/api/vision/detect`, { method: "POST", body: fd });
@@ -947,9 +1239,9 @@
             applyVisionState(data.vision_status, data.message);
           } catch (e) {
           } finally {
-            busy = false;
+            aiBusy = false;
           }
-        }, 180);
+        }, 160);
       } catch (err) {
         alert("카메라 권한을 허용해 주세요! (스마트폰에서는 https 주소 또는 localhost에서 카메라가 작동합니다)\n" + err);
       }
@@ -958,7 +1250,7 @@
     // 9. 실시간 음성 대화 (핸즈프리 + 원터치 녹음)
     async function toggleWakeWordSetting(enabled) {
       try {
-        await fetch(`${API}/api/users/1/settings`, {
+        await fetch(`${API}/api/users/${currentUserId}/settings`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wake_word_enabled: enabled })
@@ -976,7 +1268,7 @@
         const res = await fetch(`${API}/api/nlp/process-text`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, session_code: activeSessionCode, user_id: 1 })
+          body: JSON.stringify({ text, session_code: activeSessionCode, user_id: currentUserId })
         });
         const data = await res.json();
         if (data.status === "success") {
@@ -1077,6 +1369,7 @@
           const fd = new FormData();
           fd.append("file", blob, "voice.webm");
           fd.append("session_code", activeSessionCode);
+          fd.append("user_id", currentUserId);
 
           const res = await fetch(`${API}/api/nlp/process-audio`, { method: "POST", body: fd });
           const data = await res.json();
@@ -1102,8 +1395,11 @@
     }
 
     // 초기화
+    updateHeaderUserUI();
     loadRecipes();
+    connectViewerWs();
     statusPollTimer = setInterval(pollVisionStatus, 1800);
+    mirrorPollTimer = setInterval(pollMirrorStream, 200);
   </script>
 </body>
 </html>

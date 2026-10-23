@@ -32,13 +32,15 @@ app.include_router(vision.router, prefix="/api/vision", tags=["Vision"])
 # WebSocket 라우터 등록
 app.include_router(websocket.router, tags=["WebSocket"])
 
-@app.get("/")
-def read_root():
-    return {"message": "YO-Cook 서버가 정상적으로 실행 중입니다!", "mobile_app_url": "/app"}
 
-
+@app.get("/", include_in_schema=False)
 @app.get("/app", include_in_schema=False)
 def serve_mobile_app():
-    """모바일 및 웹 브라우저용 통합 YO-Cook 앱 UI를 반환합니다."""
+    """기본 주소(/) 또는 /app 접속 시 바로 YO-Cook 통합 앱 UI를 반환합니다."""
     html_path = Path(__file__).resolve().parent / "static" / "mobile_app.html"
     return FileResponse(html_path)
+
+
+@app.get("/api/health")
+def read_health():
+    return {"message": "YO-Cook 서버가 정상적으로 실행 중입니다!"}
