@@ -533,7 +533,7 @@
           <span class="step-badge" id="cook-step-badge">1 / 1 단계</span>
           <div class="hazard-mode-badges">
             <span class="h-badge on" id="badge-knife">🔪 칼날감시 ON</span>
-            <span class="h-badge" id="badge-heat">🔥 화구감시 OFF</span>
+            <span class="h-badge" id="badge-heat" onclick="toggleHeatMonitoring()" style="cursor:pointer;" title="클릭하여 화구 자리비움 감시 ON/OFF 전환">🔥 화구감시 OFF</span>
           </div>
         </div>
         <div style="font-size:13px; color:var(--muted); margin-bottom:4px;" id="cook-recipe-title">오늘의 요리</div>
@@ -628,6 +628,14 @@
     let mirrorPollTimer = null;
     let mirrorBusy = false;
     let lastDangerBeepAt = 0;
+    let fireOnMode = false;
+
+    function toggleHeatMonitoring() {
+      fireOnMode = !fireOnMode;
+      const hBadge = document.getElementById("badge-heat");
+      hBadge.className = "h-badge" + (fireOnMode ? " on" : "");
+      hBadge.innerText = `🔥 화구감시 ${fireOnMode ? 'ON' : 'OFF'}`;
+    }
 
     // 음성 인식 상태
     let recognition = null;
@@ -835,10 +843,11 @@
         // 칼/화구 감시 배지 업데이트
         const kBadge = document.getElementById("badge-knife");
         const hBadge = document.getElementById("badge-heat");
+        fireOnMode = Boolean(step.is_unattended_monitoring);
         kBadge.className = "h-badge" + (step.is_knife_monitoring ? " on" : "");
         kBadge.innerText = `🔪 칼날감시 ${step.is_knife_monitoring ? 'ON' : 'OFF'}`;
-        hBadge.className = "h-badge" + (step.is_unattended_monitoring ? " on" : "");
-        hBadge.innerText = `🔥 화구감시 ${step.is_unattended_monitoring ? 'ON' : 'OFF'}`;
+        hBadge.className = "h-badge" + (fireOnMode ? " on" : "");
+        hBadge.innerText = `🔥 화구감시 ${fireOnMode ? 'ON' : 'OFF'}`;
 
         // 타이머 세팅
         const tBox = document.getElementById("timer-box");
@@ -974,7 +983,7 @@
         pill.className = "status-pill";
         pill.innerText = "🛡️ 주방 안전";
         banner.className = "alert-banner safe";
-        bText.innerText = "✅ 현재 주방은 안전합니다. 안심하고 조리하세요!";
+        bText.innerText = (msg && msg.includes("자리 비움")) ? "👀 " + msg : "✅ 현재 주방은 안전합니다. 안심하고 조리하세요!";
       }
     }
 
@@ -1231,6 +1240,7 @@
             const fd = new FormData();
             fd.append("file", blob, "frame.jpg");
             fd.append("user_id", currentUserId);
+            fd.append("fire_on", fireOnMode);
             if (activeSessionId) fd.append("session_id", activeSessionId);
 
             const resp = await fetch(`${API}/api/vision/detect`, { method: "POST", body: fd });

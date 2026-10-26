@@ -15,6 +15,7 @@ from sqlalchemy import desc
 from app.models.database import get_db, SessionLocal
 from app.models.session import CookingSession, SafetyLog
 from app.api.websocket import manager
+from vision.unattended import UnattendedTracker, TEST_LEVELS
 
 router = APIRouter()
 
@@ -46,6 +47,7 @@ _vision_engine = {
     "initialized": False,
     "yolo": None,
     "blade_ids": [],
+    "person_ids": [],
     "landmarker": None,
 }
 TIPS = [4, 8, 12, 16, 20]
@@ -72,6 +74,7 @@ def _init_vision_engine():
     model_path = str(trained_pt) if trained_pt.exists() else "yolo11n-seg.pt"
     yolo_model = YOLO(model_path)
     blade_ids = [k for k, v in yolo_model.names.items() if v in ("knife", "scissors")]
+    person_ids = [k for k, v in yolo_model.names.items() if v == "person"]
 
     # 2. MediaPipe HandLandmarker 로드 (없으면 자동 다운로드)
     task_path = weights_dir / "hand_landmarker.task"
@@ -91,6 +94,7 @@ def _init_vision_engine():
 
     _vision_engine["yolo"] = yolo_model
     _vision_engine["blade_ids"] = blade_ids
+    _vision_engine["person_ids"] = person_ids
     _vision_engine["landmarker"] = landmarker
     _vision_engine["initialized"] = True
 
@@ -107,6 +111,7 @@ def _analyze_mobile_frame(frame_bgr):
     _init_vision_engine()
     yolo_model = _vision_engine["yolo"]
     blade_ids = _vision_engine["blade_ids"]
+    person_ids = _vision_engine["person_ids"]
     landmarker = _vision_engine["landmarker"]
 
     h, w, _ = frame_bgr.shape
@@ -143,19 +148,24 @@ def _analyze_mobile_frame(frame_bgr):
         s = abs(np.dot(d, v))
         return abs(t) > 0.5 - end_frac and s < S / 2 + L * side_frac
 
-    # 1. 칼(또는 가위) 탐지 (imgsz=320으로 추론 속도 2배 가속)
+    # 1. 칼(또는 가위) 및 사람(person) 탐지 (imgsz=320으로 추론 속도 2배 가속)
     r = yolo_model(frame_bgr, imgsz=320, conf=0.22, verbose=False)[0]
     blade = None
+    person_detected = False
     if r.obb is not None:
         for poly, c, cls in zip(r.obb.xyxyxyxy.cpu().numpy(), r.obb.conf.tolist(), r.obb.cls.tolist()):
+            if int(cls) in person_ids and c >= 0.45:
+                person_detected = True
             if int(cls) in blade_ids and (blade is None or c > blade["conf"]):
                 blade = {"conf": c, "name": yolo_model.names[int(cls)], "poly": poly.astype(np.float32)}
     elif r.boxes is not None:
         for i, b in enumerate(r.boxes):
             cls = int(b.cls[0])
+            c = float(b.conf[0])
+            if cls in person_ids and c >= 0.45:
+                person_detected = True
             if cls not in blade_ids:
                 continue
-            c = float(b.conf[0])
             if blade is not None and c <= blade["conf"]:
                 continue
             x1, y1, x2, y2 = [float(v) for v in b.xyxy[0].tolist()]
@@ -229,6 +239,7 @@ def _analyze_mobile_frame(frame_bgr):
     return {
         "status": status_str,
         "blade_detected": blade is not None,
+        "person_detected": person_detected,
         "hands_count": len(hands),
         "ratio": round(float(ratio), 3) if ratio is not None else None,
         "distance_px": dist_px,
@@ -416,6 +427,7 @@ def _ensure_user_stream(uid: int) -> dict:
             "session_id": None,
             "current_step": 1,
             "db_checked_at": 0.0,
+            "unattended_tracker": UnattendedTracker(TEST_LEVELS),
         }
     return user_streams[uid]
 
@@ -610,16 +622,19 @@ def get_user_live_mirror(
     }
 
 
-@router.post("/detect", summary="모바일/웹 카메라 실시간 프레임 비전 분석 API (백그라운드 스레드 실행)")
+@router.post("/detect", summary="모바일/웹 카메라 실시간 프레임 비전 분석 API (칼 위험 + 화구 자리 비움 통합)")
 async def detect_objects(
     file: UploadFile = File(...),
     session_id: Optional[int] = Form(None),
     user_id: Optional[int] = Form(1),
+    fire_on: Optional[bool] = Form(None),
     db: Session = Depends(get_db)
 ):
     """
-    모바일 앱(또는 웹캠)으로부터 실시간 프레임을 받아 step6 알고리즘(YOLO + MediaPipe Hands)으로
-    칼 다각형과 고양이손 위험 여부를 판별합니다.
+    모바일 앱(또는 웹캠)으로부터 실시간 프레임을 받아:
+    1) step6 알고리즘(YOLO + MediaPipe Hands)으로 칼 다각형과 고양이손 위험 여부를 판별하고,
+    2) step7 알고리즘(UnattendedTracker)으로 화구 감시(fire_on / is_unattended_monitoring) 단계에서
+       사람(person)과 손(hand)이 모두 화면에서 사라진 시간(5/10/15초)을 추적해 자리 비움 경고를 발생시킵니다.
     * 무거운 YOLO/MediaPipe 추론을 별도 워커 스레드(asyncio.to_thread)에서 실행하여 영상 미러링 프레임이 절대 끊기지 않도록 보장합니다.
     """
     import cv2
@@ -638,10 +653,36 @@ async def detect_objects(
     if analysis is None:
         return {"status": "error", "message": "유효하지 않은 이미지 프레임입니다."}
 
+    uid = user_id or 1
+    stream = _ensure_user_stream(uid)
+
+    # 현재 조리 세션 단계의 감시 플래그 확인 (칼 감시 / 화구 자리비움 감시)
+    _sync_active_session_step_flags(db, session_id)
+    is_heat_mode = fire_on if fire_on is not None else bool(vision_state["is_unattended_monitoring"])
+
+    # 화구 자리 비움(UnattendedTracker) 업데이트: 사람(person) 또는 손(hand)이 보이면 present=True
+    tracker: UnattendedTracker = stream["unattended_tracker"]
+    present = bool(analysis.get("person_detected") or analysis["hands_count"] > 0)
+    u_level, absent_sec = tracker.update(present=present, now=time.time(), fire_on=is_heat_mode)
+
+    final_status = analysis["status"]
+    hazard_type = "KNIFE_PROXIMITY"
+    custom_msg = None
+
+    # 칼 위험이 없을 때 화구 자리 비움 경고가 발생하면 자리 비움 상태 반영
+    if final_status == "SAFE" and is_heat_mode:
+        if u_level in ("WARNING", "DANGER"):
+            final_status = u_level
+            hazard_type = "UNATTENDED"
+            custom_msg = f"[자리 비움] {int(absent_sec)}초째 자리에 없어요. 불을 확인하세요!"
+        elif u_level == "INFO":
+            custom_msg = f"[자리 비움 감지 중] {int(absent_sec)}초째 자리에 없습니다. (10초 이상 시 주의 경고)"
+
     # 상태 업데이트 및 디바운싱 DB 로깅 연동
     report = VisionStatusReport(
-        status=analysis["status"],
-        hazard_type="KNIFE_PROXIMITY",
+        status=final_status,
+        hazard_type=hazard_type,
+        message=custom_msg,
         ratio=analysis["ratio"],
         distance_px=analysis["distance_px"],
         session_id=session_id
@@ -649,10 +690,8 @@ async def detect_objects(
     status_res = await update_vision_status(report, db)
 
     # 최신 AI 좌표 및 위험 상태를 사용자 스트림 버퍼에 갱신 후 PC 뷰어들에게 즉시 브로드캐스트
-    uid = user_id or 1
-    stream = _ensure_user_stream(uid)
     stream["updated_at"] = time.time()
-    stream["status"] = analysis["status"]
+    stream["status"] = final_status
     stream["message"] = vision_state["message"]
     stream["frame_b64"] = base64.b64encode(raw_bytes).decode("utf-8")
     stream["frame_w"] = analysis["frame_w"]
@@ -679,9 +718,13 @@ async def detect_objects(
 
     return {
         "status": "success",
-        "vision_status": analysis["status"],
+        "vision_status": final_status,
+        "hazard_type": hazard_type,
         "blade_detected": analysis["blade_detected"],
+        "person_detected": analysis["person_detected"],
         "hands_count": analysis["hands_count"],
+        "unattended_level": u_level,
+        "absent_seconds": round(float(absent_sec), 1),
         "ratio": analysis["ratio"],
         "distance_px": analysis["distance_px"],
         "frame_w": analysis["frame_w"],
