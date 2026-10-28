@@ -103,7 +103,8 @@ with col_right:
                     
                     # 화면 출력을 위해 색상 변환 (BGR -> RGB)
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    vision_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
+                    # [수정됨] use_column_width=True -> use_container_width=True
+                    vision_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
                     
                     # 상태에 따른 UI 경고 표시 
                     if status == "DANGER":
@@ -119,7 +120,8 @@ with col_right:
         # 모니터링 토글을 끄면 웹캠 자원 해제
         cap.release()
     else:
-        vision_placeholder.image("https://via.placeholder.com/600x320?text=Webcam+Off", use_column_width=True)
+        # [수정됨] use_column_width=True -> use_container_width=True
+        vision_placeholder.image("https://via.placeholder.com/600x320?text=Webcam+Off", use_container_width=True)
         alert_placeholder.empty()
 
     st.markdown("---")
