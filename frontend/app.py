@@ -269,8 +269,29 @@ with col_right:
                         }}
                     }};
 
+                    // 권한 거부/차단 시에는 자동 재시작을 멈춰 팝업이 반복되지 않게 함
+                    let fatal = false;
+                    let restartDelay = 800;
+                    recognition.onstart = () => {{ restartDelay = 800; }};
+                    recognition.onerror = (e) => {{
+                        if (e.error === "not-allowed" || e.error === "service-not-allowed") {{
+                            fatal = true;
+                            statusTitle.innerText = "🔇 마이크 권한이 필요합니다. 아래 버튼을 눌러 허용해 주세요.";
+                            micDot.style.background = "#ef4444";
+                            const b = document.createElement("button");
+                            b.innerText = "🎤 음성 인식 켜기";
+                            b.style.cssText = "margin-top:6px;padding:8px 14px;border-radius:8px;border:0;background:#2563eb;color:#fff;font-size:14px;";
+                            b.onclick = () => {{ fatal = false; b.remove(); try {{ recognition.start(); }} catch (err) {{}} }};
+                            transcriptBox.appendChild(b);
+                        }}
+                    }};
+                    // 모바일 Chrome은 말이 끝날 때마다 onend가 발생하므로, 즉시 재시작하지 않고 간격을 두고 재시작
                     recognition.onend = () => {{
-                        try {{ recognition.start(); }} catch (e) {{}}
+                        if (fatal) return;
+                        setTimeout(() => {{
+                            try {{ recognition.start(); }} catch (e) {{}}
+                        }}, restartDelay);
+                        restartDelay = Math.min(restartDelay * 1.5, 5000);
                     }};
                     try {{ recognition.start(); }} catch (e) {{}}
                 }}
