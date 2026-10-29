@@ -637,6 +637,9 @@
       const hBadge = document.getElementById("badge-heat");
       hBadge.className = "h-badge" + (fireOnMode ? " on" : "");
       hBadge.innerText = `🔥 화구감시 ${fireOnMode ? 'ON' : 'OFF'}`;
+      if (!fireOnMode) {
+        applyVisionState("SAFE", "✅ 현재 주방은 안전합니다. 안심하고 조리하세요!");
+      }
     }
 
     // 음성 인식 상태
@@ -851,6 +854,9 @@
         kBadge.innerText = `🔪 칼날감시 ${step.is_knife_monitoring ? 'ON' : 'OFF'}`;
         hBadge.className = "h-badge" + (fireOnMode ? " on" : "");
         hBadge.innerText = `🔥 화구감시 ${fireOnMode ? 'ON' : 'OFF'}`;
+        if (!fireOnMode) {
+          applyVisionState("SAFE", "✅ 현재 주방은 안전합니다. 안심하고 조리하세요!");
+        }
 
         // 타이머 세팅
         const tBox = document.getElementById("timer-box");

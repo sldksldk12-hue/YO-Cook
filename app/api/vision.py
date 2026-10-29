@@ -484,8 +484,10 @@ async def _run_background_ai_on_stream(uid: int, frame_b64: str, sender_ws: WebS
         if not analysis:
             return
 
-        is_heat_mode = bool(stream.get("fire_on")) or bool(vision_state.get("is_unattended_monitoring"))
+        is_heat_mode = bool(stream.get("fire_on"))
         tracker: UnattendedTracker = stream["unattended_tracker"]
+        if not is_heat_mode:
+            tracker.reset()
         present = bool(analysis.get("person_detected") or analysis["hands_count"] > 0)
         u_level, absent_sec = tracker.update(present=present, now=time.time(), fire_on=is_heat_mode)
 
