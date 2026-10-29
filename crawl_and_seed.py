@@ -13,6 +13,11 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 load_dotenv()
 
 from sqlalchemy import text
@@ -113,32 +118,39 @@ def detect_safety_warning_and_tools(instruction: str) -> tuple[str | None, str |
 # ==========================================
 # 3. 만개의레시피 크롤러 본체
 # ==========================================
-def crawl_and_seed_recipes(target_count: int = 20):
+def crawl_and_seed_recipes(target_count: int = 50):
     print(f"\n[*] 만개의레시피 인기 목록에서 상위 {target_count}개 레시피 수집 시작...")
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
-    # 1. 목록 페이지에서 레시피 링크 수집
-    list_url = "https://www.10000recipe.com/recipe/list.html?order=reco&page=1"
-    res = requests.get(list_url, headers=headers, timeout=10)
-    if res.status_code != 200:
-        print(f"[!] 목록 페이지 요청 실패: Status {res.status_code}")
-        return
-
-    soup = BeautifulSoup(res.text, "html.parser")
-    items = soup.select("ul.rcp_m_list2 li.common_sp_list_li")
-    
+    # 1. 목록 페이지(page=1, 2, ...)를 순회하며 target_count(50개)만큼 레시피 링크 수집 (1페이지당 약 40개)
     recipe_links = []
-    for li in items:
-        link_tag = li.select_one("a.common_sp_link")
-        if link_tag and link_tag.get("href"):
-            href = link_tag["href"]
-            if href.startswith("/recipe/"):
-                recipe_links.append(f"https://www.10000recipe.com{href}")
-        if len(recipe_links) >= target_count:
+    page = 1
+    while len(recipe_links) < target_count and page <= 5:
+        list_url = f"https://www.10000recipe.com/recipe/list.html?order=reco&page={page}"
+        res = requests.get(list_url, headers=headers, timeout=10)
+        if res.status_code != 200:
+            print(f"[!] 목록 페이지(page={page}) 요청 실패: Status {res.status_code}")
             break
+
+        soup = BeautifulSoup(res.text, "html.parser")
+        items = soup.select("ul.rcp_m_list2 li.common_sp_list_li")
+        if not items:
+            break
+
+        for li in items:
+            link_tag = li.select_one("a.common_sp_link")
+            if link_tag and link_tag.get("href"):
+                href = link_tag["href"]
+                if href.startswith("/recipe/"):
+                    full_url = f"https://www.10000recipe.com{href}"
+                    if full_url not in recipe_links:
+                        recipe_links.append(full_url)
+            if len(recipe_links) >= target_count:
+                break
+        page += 1
 
     print(f"[+] 총 {len(recipe_links)}개의 레시피 링크 확보 완료!")
 
@@ -171,11 +183,11 @@ def crawl_and_seed_recipes(target_count: int = 20):
                 title_tag = detail_soup.select_one("div.view2_summary h3")
                 if not title_tag:
                     continue
-                title = title_tag.get_text(strip=True)
+                title = title_tag.get_text(strip=True).replace("\xa0", " ")
 
                 # 요리 소개
                 desc_tag = detail_soup.select_one("div.view2_summary_in")
-                description = desc_tag.get_text(strip=True) if desc_tag else ""
+                description = desc_tag.get_text(strip=True).replace("\xa0", " ") if desc_tag else ""
 
                 # 분량, 시간, 난이도
                 servings_tag = detail_soup.select_one("span.view2_summary_info1")
@@ -333,4 +345,4 @@ if __name__ == "__main__":
 
     # 3. 크롤링 및 적재 실행
     # target_count = x -> x의 값을 변경하면 크롤링할 데이터의 수량을 변경할 수 있음
-    crawl_and_seed_recipes(target_count=20)
+    crawl_and_seed_recipes(target_count=50)

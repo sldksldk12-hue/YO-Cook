@@ -3,6 +3,7 @@ import math
 import json
 import base64
 import asyncio
+import threading
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -38,6 +39,7 @@ vision_state = {
     "latest_frame_b64": None,  # 실시간 중계용 최신 분석 프레임 (Base64 JPEG)
     "updated_at": 0.0,
     "last_db_log_at": 0.0,   # 마지막 DB 저장 시각 (디바운싱용)
+    "last_flag_sync_at": 0.0, # DB 세션 플래그 캐싱 시각
 }
 
 # =====================================================================
@@ -50,6 +52,7 @@ _vision_engine = {
     "person_ids": [],
     "landmarker": None,
 }
+_vision_lock = threading.Lock()
 TIPS = [4, 8, 12, 16, 20]
 FINGERS = [(6, 8), (10, 12), (14, 16), (18, 20)]
 MARGIN = 0.5
@@ -262,11 +265,15 @@ class VisionStatusReport(BaseModel):
     step_number: Optional[int] = Field(None, description="현재 조리 단계 번호")
 
 
-def _sync_active_session_step_flags(db: Session, session_id: Optional[int] = None) -> Optional[CookingSession]:
+def _sync_active_session_step_flags(db: Session, session_id: Optional[int] = None, force: bool = False) -> Optional[CookingSession]:
     """
     현재 진행 중인 조리 세션의 단계별 안전 모니터링 플래그(칼 감지 / 자리비움 감지)를 조회하여
-    vision_state에 동기화하고 대상 세션을 반환합니다.
+    vision_state에 동기화하고 대상 세션을 반환합니다. (초당 수십 회 호출 시 DB 병목 방지를 위해 2초 캐싱)
     """
+    now = time.time()
+    if not force and (now - vision_state.get("last_flag_sync_at", 0.0) < 2.0):
+        return None
+    vision_state["last_flag_sync_at"] = now
     try:
         target_session = None
         if session_id:
@@ -367,6 +374,8 @@ async def update_vision_status(
         if now - vision_state["last_db_log_at"] >= DEBOUNCE_COOLDOWN_SEC:
             vision_state["last_db_log_at"] = now
             try:
+                if not target_session:
+                    target_session = _sync_active_session_step_flags(db, payload.session_id, force=True)
                 if target_session:
                     step_num = payload.step_number or target_session.current_step or 1
                     new_log = SafetyLog(
@@ -426,6 +435,9 @@ def _ensure_user_stream(uid: int) -> dict:
             "nearest_line": None,
             "session_id": None,
             "current_step": 1,
+            "fire_on": False,
+            "ai_running": False,
+            "last_ai_at": 0.0,
             "db_checked_at": 0.0,
             "unattended_tracker": UnattendedTracker(TEST_LEVELS),
         }
@@ -441,19 +453,146 @@ async def _broadcast_to_viewers(uid: int, payload: dict):
     msg_text = json.dumps(payload, ensure_ascii=False)
     for ws in list(viewers):
         try:
-            await ws.send_text(msg_text)
+            await asyncio.wait_for(ws.send_text(msg_text), timeout=0.35)
         except Exception:
             dead.append(ws)
     for ws in dead:
         viewers.discard(ws)
 
 
+async def _run_background_ai_on_stream(uid: int, frame_b64: str, sender_ws: WebSocket):
+    """
+    WebSocket으로 수신된 최신 프레임에 대해 백그라운드 워커 스레드에서 YOLO + MediaPipe + 자리비움 추론을 수행하고,
+    완료 즉시 송신측(휴대폰)과 수신측(PC 뷰어) 모두에게 AI 오버레이 좌표를 브로드캐스트합니다.
+    * 영상 미러링 루프를 단 1ms도 블로킹하지 않으며, HTTP 다중 요청 병목을 완전히 제거합니다!
+    """
+    import cv2
+    import numpy as np
+
+    stream = _ensure_user_stream(uid)
+    try:
+        def _decode_and_infer(b64_str: str):
+            raw = base64.b64decode(b64_str)
+            arr = np.frombuffer(raw, np.uint8)
+            frm = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if frm is None:
+                return None
+            with _vision_lock:
+                return _analyze_mobile_frame(frm)
+
+        analysis = await asyncio.to_thread(_decode_and_infer, frame_b64)
+        if not analysis:
+            return
+
+        is_heat_mode = bool(stream.get("fire_on")) or bool(vision_state.get("is_unattended_monitoring"))
+        tracker: UnattendedTracker = stream["unattended_tracker"]
+        present = bool(analysis.get("person_detected") or analysis["hands_count"] > 0)
+        u_level, absent_sec = tracker.update(present=present, now=time.time(), fire_on=is_heat_mode)
+
+        final_status = analysis["status"]
+        hazard_type = "KNIFE_PROXIMITY"
+        if final_status == "DANGER":
+            msg = "[위험] 칼날과 손가락이 너무 가깝습니다! 고양이 손을 유지하세요!"
+        elif final_status == "WARNING":
+            msg = "[주의] 칼날 근처에 손이 접근 중입니다. 주의하세요."
+        else:
+            msg = "[안전] 현재 주방은 안전합니다."
+
+        if final_status == "SAFE" and is_heat_mode:
+            if u_level in ("WARNING", "DANGER"):
+                final_status = u_level
+                hazard_type = "UNATTENDED"
+                msg = f"[자리 비움] {int(absent_sec)}초째 자리에 없어요. 불을 확인하세요!"
+            elif u_level == "INFO":
+                msg = f"[자리 비움 감지 중] {int(absent_sec)}초째 자리에 없습니다. (10초 이상 시 주의 경고)"
+
+        now = time.time()
+        vision_state["status"] = final_status
+        vision_state["hazard_type"] = hazard_type if final_status != "SAFE" else "NONE"
+        vision_state["message"] = msg
+        vision_state["ratio"] = analysis["ratio"]
+        vision_state["distance_px"] = analysis["distance_px"]
+        vision_state["updated_at"] = now
+
+        stream["status"] = final_status
+        stream["message"] = msg
+        stream["frame_w"] = analysis["frame_w"]
+        stream["frame_h"] = analysis["frame_h"]
+        stream["blade_poly"] = analysis["blade_poly"]
+        stream["hands"] = analysis["hands"]
+        stream["nearest_line"] = analysis["nearest_line"]
+
+        # WARNING/DANGER 발생 시 3초 디바운싱 DB 로깅 (백그라운드 세션)
+        if final_status in ("WARNING", "DANGER") and (now - vision_state["last_db_log_at"] >= DEBOUNCE_COOLDOWN_SEC):
+            vision_state["last_db_log_at"] = now
+
+            def _log_hazard_sync():
+                db = SessionLocal()
+                try:
+                    sess_id = stream.get("session_id")
+                    target_sess = db.get(CookingSession, sess_id) if sess_id else (
+                        db.query(CookingSession)
+                        .filter(CookingSession.user_id == uid, CookingSession.is_completed == False)
+                        .order_by(desc(CookingSession.started_at))
+                        .first()
+                    )
+                    if target_sess:
+                        new_log = SafetyLog(
+                            session_id=target_sess.id,
+                            step_number=target_sess.current_step or 1,
+                            hazard_type=hazard_type,
+                            level=final_status,
+                            message=msg,
+                            distance_px=analysis["distance_px"],
+                            duration_seconds=round(float(absent_sec), 1) if hazard_type == "UNATTENDED" else None,
+                            detected_at=datetime.utcnow(),
+                        )
+                        db.add(new_log)
+                        db.commit()
+                except Exception:
+                    pass
+                finally:
+                    db.close()
+
+            asyncio.create_task(asyncio.to_thread(_log_hazard_sync))
+
+        overlay_payload = {
+            "type": "OVERLAY",
+            "is_streaming": True,
+            "status": final_status,
+            "vision_status": final_status,
+            "message": msg,
+            "frame_w": analysis["frame_w"],
+            "frame_h": analysis["frame_h"],
+            "blade_poly": analysis["blade_poly"],
+            "hands": analysis["hands"],
+            "nearest_line": analysis["nearest_line"],
+            "active_session_id": stream.get("session_id"),
+            "current_step": stream.get("current_step", 1),
+        }
+
+        # 1) 휴대폰(송신기) 화면의 오버레이 캔버스 즉시 갱신
+        try:
+            await asyncio.wait_for(sender_ws.send_text(json.dumps(overlay_payload, ensure_ascii=False)), timeout=0.25)
+        except Exception:
+            pass
+
+        # 2) PC(뷰어) 화면의 오버레이 캔버스 즉시 갱신
+        await _broadcast_to_viewers(uid, overlay_payload)
+    except Exception:
+        pass
+    finally:
+        stream["ai_running"] = False
+
+
 @router.websocket("/ws/mirror/{user_id}")
 async def ws_user_mirror(websocket: WebSocket, user_id: int, role: str = "viewer"):
     """
-    초고속(20~30fps) 실시간 영상 및 AI 오버레이 미러링 전용 WebSocket:
-    - role=sender (휴대폰): 카메라 JPEG 프레임(Base64)을 YOLO 대기 없이 50~60ms마다 즉시 전송
-    - role=viewer (PC 홈페이지): 휴대폰이 보내는 영상 프레임과 AI 칼·손 좌표를 지연 없이 실시간 수신
+    초고속(20~30fps) 실시간 영상 및 AI 오버레이 통합 WebSocket:
+    - role=sender (휴대폰): 카메라 JPEG 프레임(Base64)을 전송하면
+      1) PC 뷰어에게 0ms 지연으로 즉시 중계하고 ACK를 반환하며,
+      2) 백그라운드 스레드에서 AI 비전(칼/손/자리비움)을 비동기 실행해 완료 즉시 휴대폰과 PC 양쪽에 OVERLAY를 푸시합니다.
+    - role=viewer (PC 홈페이지): 휴대폰이 보내는 영상 프레임과 AI 칼·손 좌표를 실시간 수신합니다.
     """
     await websocket.accept()
     uid = user_id or 1
@@ -482,8 +621,9 @@ async def ws_user_mirror(websocket: WebSocket, user_id: int, role: str = "viewer
                     "current_step": stream.get("current_step", 1),
                 }, ensure_ascii=False))
             while True:
-                # 뷰어 연결 유지용 수신 대기
-                await websocket.receive_text()
+                msg = await websocket.receive_text()
+                if msg == "PING":
+                    await websocket.send_text('{"type":"PONG"}')
         except WebSocketDisconnect:
             pass
         except Exception:
@@ -496,15 +636,23 @@ async def ws_user_mirror(websocket: WebSocket, user_id: int, role: str = "viewer
         try:
             while True:
                 raw_msg = await websocket.receive_text()
+                if raw_msg == "PING":
+                    await websocket.send_text('{"type":"PONG"}')
+                    continue
                 data = json.loads(raw_msg)
-                if data.get("type") == "STOP":
+                msg_type = data.get("type")
+                if msg_type == "PING":
+                    await websocket.send_text('{"type":"PONG"}')
+                    continue
+                if msg_type == "STOP":
                     stream["updated_at"] = 0.0
                     await _broadcast_to_viewers(uid, {"type": "STOP", "is_streaming": False})
                     continue
 
                 frame_b64 = data.get("frame_b64")
                 if frame_b64:
-                    stream["updated_at"] = time.time()
+                    now_ts = time.time()
+                    stream["updated_at"] = now_ts
                     stream["frame_b64"] = frame_b64
                     if data.get("frame_w"):
                         stream["frame_w"] = data["frame_w"]
@@ -512,8 +660,13 @@ async def ws_user_mirror(websocket: WebSocket, user_id: int, role: str = "viewer
                         stream["frame_h"] = data["frame_h"]
                     if data.get("session_id"):
                         stream["session_id"] = data["session_id"]
+                    if "fire_on" in data and data["fire_on"] is not None:
+                        stream["fire_on"] = bool(data["fire_on"])
 
-                    # PC 뷰어들에게 지연 없이 즉시 영상 프레임 + 최신 AI 오버레이 브로드캐스트
+                    # 1) 송신측(휴대폰)에 즉시 ACK부터 반환하여 네트워크 왕복 지연을 최소화
+                    await websocket.send_text('{"type":"ACK"}')
+
+                    # 2) PC 뷰어들에게 지연 없이 즉시 영상 프레임 + 최신 AI 오버레이 브로드캐스트
                     await _broadcast_to_viewers(uid, {
                         "type": "FRAME",
                         "is_streaming": True,
@@ -528,6 +681,12 @@ async def ws_user_mirror(websocket: WebSocket, user_id: int, role: str = "viewer
                         "active_session_id": stream.get("session_id"),
                         "current_step": stream.get("current_step", 1),
                     })
+
+                    # 3) AI 추론이 현재 돌고 있지 않다면 즉시 백그라운드 태스크로 최신 프레임 AI 추론 시작 (HTTP 중복 업로드 제거!)
+                    if not stream.get("ai_running"):
+                        stream["ai_running"] = True
+                        stream["last_ai_at"] = now_ts
+                        asyncio.create_task(_run_background_ai_on_stream(uid, frame_b64, websocket))
         except WebSocketDisconnect:
             stream["updated_at"] = 0.0
             await _broadcast_to_viewers(uid, {"type": "STOP", "is_streaming": False})
@@ -643,11 +802,12 @@ async def detect_objects(
     raw_bytes = await file.read()
 
     def _decode_and_analyze(b: bytes):
-        arr = np.frombuffer(b, np.uint8)
-        frm = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if frm is None:
-            return None
-        return _analyze_mobile_frame(frm)
+        with _vision_lock:
+            arr = np.frombuffer(b, np.uint8)
+            frm = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if frm is None:
+                return None
+            return _analyze_mobile_frame(frm)
 
     analysis = await asyncio.to_thread(_decode_and_analyze, raw_bytes)
     if analysis is None:
@@ -690,10 +850,13 @@ async def detect_objects(
     status_res = await update_vision_status(report, db)
 
     # 최신 AI 좌표 및 위험 상태를 사용자 스트림 버퍼에 갱신 후 PC 뷰어들에게 즉시 브로드캐스트
-    stream["updated_at"] = time.time()
+    now_ts = time.time()
+    # WebSocket 송신 채널이 이미 최신 프레임을 보내고 있다면 200ms 전의 과거 프레임으로 덮어쓰지 않음
+    if not stream.get("frame_b64") or (now_ts - stream.get("updated_at", 0) > 0.6):
+        stream["frame_b64"] = base64.b64encode(raw_bytes).decode("utf-8")
+    stream["updated_at"] = now_ts
     stream["status"] = final_status
     stream["message"] = vision_state["message"]
-    stream["frame_b64"] = base64.b64encode(raw_bytes).decode("utf-8")
     stream["frame_w"] = analysis["frame_w"]
     stream["frame_h"] = analysis["frame_h"]
     stream["blade_poly"] = analysis["blade_poly"]
