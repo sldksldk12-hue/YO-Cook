@@ -42,7 +42,7 @@ def _strip_wake_word(text: str, wake_word: str = "요쿡아") -> tuple[bool, str
     호출어 뒷부분의 실제 질문만 깔끔하게 분리합니다.
     """
     cleaned = text.strip()
-    candidates = [wake_word, "요쿡아", "요쿠가", "요쿡", "요국아", "요코가", "여쿡아"]
+    candidates = [wake_word, "요쿡아", "요쿠가", "요쿡", "요국아", "요코가", "여쿡아", "유쿡아", "요쿡이"]
     detected = False
     for w in candidates:
         if w and w in cleaned:
@@ -53,6 +53,13 @@ def _strip_wake_word(text: str, wake_word: str = "요쿡아") -> tuple[bool, str
                 cleaned = remainder
             break
     return detected, cleaned
+
+
+# Whisper가 무음/백색소음 구간에서 습관적으로 생성하는 환각(Hallucination) 문구 필터
+WHISPER_HALLUCINATIONS = (
+    "시청해주셔서", "시청해 주셔서", "구독과 좋아요", "MBC 뉴스", "SBS 뉴스", "KBS 뉴스",
+    "자막 제공", "한글자막", "감사합니다.", "다음 영상에서", "알림 설정", "소금, 간장, 고추장"
+)
 
 
 def classify_user_intent(user_text: str) -> str:
@@ -75,7 +82,13 @@ def classify_user_intent(user_text: str) -> str:
     return chain.invoke({"text": user_text})
 
 
-def _build_voice_response(recognized_text: str, session_code: str, db: Session, user_id: int = 1) -> dict:
+def _build_voice_response(
+    recognized_text: str,
+    session_code: str,
+    db: Session,
+    user_id: int = 1,
+    require_wake_word: bool = False,
+) -> dict:
     """인식된 텍스트에 대해 호출어 처리, 의도 분류, RAG 답변 생성 및 TTS 음성 합성을 수행합니다."""
     if not recognized_text or not recognized_text.strip():
         return {
@@ -93,6 +106,15 @@ def _build_voice_response(recognized_text: str, session_code: str, db: Session, 
         pass
 
     wake_detected, query_text = _strip_wake_word(recognized_text, wake_word)
+
+    # 핸즈프리 모드에서 호출어('요쿡아') 필수 옵션이 켜져 있는데 호출어가 없는 경우 LLM 호출 생략
+    if require_wake_word and not wake_detected:
+        return {
+            "status": "ignored_wake",
+            "recognized_text": recognized_text,
+            "wake_word_detected": False,
+            "message": f"('요쿡아'를 붙여 말씀해 주세요) \"{recognized_text}\""
+        }
 
     # 호출어만 부르고 뒷말이 없는 경우 ("요쿡아!")
     if wake_detected and query_text in ("", wake_word):
@@ -137,6 +159,7 @@ async def process_audio(
     file: UploadFile = File(...),
     session_code: str = Form(...),  # 클라이언트로부터 세션 방 번호 받기
     user_id: Optional[int] = Form(1),
+    require_wake_word: Optional[bool] = Form(False),
     db: Session = Depends(get_db)
 ):
     """클라이언트로부터 실시간 마이크 음성(또는 오디오 파일)을 받아 STT, 의도 분석, 세션 맞춤형 답변(RAG) 및 TTS 음성을 반환합니다."""
@@ -147,10 +170,35 @@ async def process_audio(
         shutil.copyfileobj(file.file, buffer)
     
     try:
-        # 1. 음성 인식 (STT)
-        result = whisper_model.transcribe(temp_file_path, language="ko")
-        recognized_text = result["text"].strip()
-        return _build_voice_response(recognized_text, session_code, db, user_id=user_id or 1)
+        # 1. 음성 인식 (STT) - 무음 구간 환각(Hallucination) 원천 차단 옵션 적용
+        result = whisper_model.transcribe(
+            temp_file_path,
+            language="ko",
+            temperature=0.0,
+            no_speech_threshold=0.45,
+            logprob_threshold=-0.8,
+            condition_on_previous_text=False,
+        )
+        # 세그먼트의 무음 확률(no_speech_prob)이 높으면 빈 문자열 처리
+        segments = result.get("segments") or []
+        valid_texts = [
+            seg.get("text", "").strip()
+            for seg in segments
+            if seg.get("no_speech_prob", 0.0) < 0.55 and seg.get("avg_logprob", 0.0) > -1.0
+        ]
+        recognized_text = " ".join(valid_texts).strip()
+
+        # 무음 환각 상투어이거나 1글자 이하 노이즈면 무시
+        if len(recognized_text) <= 1 or any(h in recognized_text for h in WHISPER_HALLUCINATIONS):
+            recognized_text = ""
+
+        return _build_voice_response(
+            recognized_text,
+            session_code,
+            db,
+            user_id=user_id or 1,
+            require_wake_word=bool(require_wake_word),
+        )
     except Exception as e:
         return {"status": "error", "message": str(e)}
     finally:

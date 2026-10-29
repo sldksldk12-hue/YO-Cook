@@ -643,6 +643,7 @@
     let recognition = null;
     let handsFreeOn = false;
     let isAiSpeaking = false;
+    let persistentMicStream = null; // 마이크 권한 유지 및 재팝업 방지용 영구 오디오 스트림
 
     // 0. 사용자 인증 (아이디 + 비밀번호 로그인/회원가입 및 기기 간 세션 자동 동기화)
     function updateHeaderUserUI() {
@@ -1371,23 +1372,100 @@
       }
     }
 
-    function toggleHandsFree() {
+    let vadAudioCtx = null;
+    let vadLoopTimer = null;
+    let activeRecorder = null;
+
+    async function sendAudioBlobToWhisper(blob, requireWakeWord) {
+      const tBox = document.getElementById("voice-transcript");
+      const rBox = document.getElementById("voice-ai-reply");
+      isAiSpeaking = true;
+      tBox.innerHTML = `⏳ <b>음성 분석 중...</b> <span style="color:#38bdf8;">(Whisper AI가 듣고 있습니다)</span>`;
+
+      try {
+        const fd = new FormData();
+        fd.append("file", blob, "voice.webm");
+        fd.append("session_code", activeSessionCode);
+        fd.append("user_id", currentUserId);
+        fd.append("require_wake_word", requireWakeWord ? "true" : "false");
+
+        const res = await fetch(`${API}/api/nlp/process-audio`, { method: "POST", body: fd });
+        const data = await res.json();
+
+        if (data.status === "ignored_wake") {
+          tBox.innerText = `💤 ${data.message}`;
+          isAiSpeaking = false;
+          return;
+        }
+        if (data.status === "empty") {
+          tBox.innerText = "🎙️ 핸즈프리 대기 중... ('요쿡아'라고 말씀해 보세요)";
+          isAiSpeaking = false;
+          return;
+        }
+        if (data.status === "success") {
+          if (data.session_id) activeSessionId = data.session_id;
+          if (data.session_code) activeSessionCode = data.session_code;
+          await refreshSessionUI();
+
+          tBox.innerHTML = `🗣️ <b>내 질문:</b> "${data.recognized_text}"`;
+          rBox.style.display = "block";
+          rBox.innerHTML = `🤖 <b>YO-Cook ${data.intent}:</b><br/>${data.ai_response}`;
+          if (data.audio_base64) {
+            const audio = new Audio("data:audio/mp3;base64," + data.audio_base64);
+            audio.onended = () => { isAiSpeaking = false; };
+            audio.onerror = () => { isAiSpeaking = false; };
+            await audio.play();
+          } else {
+            isAiSpeaking = false;
+          }
+        } else {
+          isAiSpeaking = false;
+        }
+      } catch (e) {
+        isAiSpeaking = false;
+      }
+    }
+
+    // [단일 스트림 VAD 핸즈프리] 모바일에서 마이크 허용 팝업이 최초 1회만 뜨고 절대 재노출되지 않는 Web Audio API 볼륨 감지 방식
+    async function toggleHandsFree() {
       const btn = document.getElementById("handsfree-btn");
       const wave = document.getElementById("voice-wave");
       const tBox = document.getElementById("voice-transcript");
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
       if (handsFreeOn) {
         handsFreeOn = false;
-        if (recognition) recognition.stop();
+        if (vadLoopTimer) {
+          clearInterval(vadLoopTimer);
+          vadLoopTimer = null;
+        }
+        if (activeRecorder && activeRecorder.state === "recording") {
+          try { activeRecorder.stop(); } catch (e) {}
+        }
+        activeRecorder = null;
+        if (vadAudioCtx) {
+          try { vadAudioCtx.close(); } catch (e) {}
+          vadAudioCtx = null;
+        }
+        if (persistentMicStream) {
+          persistentMicStream.getTracks().forEach(t => t.stop());
+          persistentMicStream = null;
+        }
         btn.className = "btn-voice off";
         btn.innerText = "🟢 핸즈프리 연속 대화 켜기";
         wave.classList.remove("listening");
+        tBox.innerText = "💬 핸즈프리 연속 대화가 종료되었습니다.";
         return;
       }
 
-      if (!SpeechRecognition) {
-        alert("이 브라우저는 상시 음성 인식을 지원하지 않습니다. 오른쪽 [🎤 3초 녹음 질문] 버튼을 사용해 주세요!");
+      // 최초 1회만 마이크 스트림을 열고 핸즈프리가 켜져 있는 내내 끊지 않고 유지합니다 (팝업 재발생 0%)
+      try {
+        if (!persistentMicStream || !persistentMicStream.active) {
+          persistentMicStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+          });
+        }
+      } catch (err) {
+        alert("마이크 권한을 허용해 주세요!\n" + err);
         return;
       }
 
@@ -1395,38 +1473,88 @@
       btn.className = "btn-voice";
       btn.innerText = "⏹️ 핸즈프리 대화 끄기 (듣는 중...)";
       wave.classList.add("listening");
+      tBox.innerText = "🎙️ 핸즈프리 대기 중... ('요쿡아 다음 단계 알려줘'처럼 말씀해 보세요!)";
 
-      recognition = new SpeechRecognition();
-      recognition.lang = "ko-KR";
-      recognition.continuous = true;
-      recognition.interimResults = true;
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      vadAudioCtx = new AudioCtx();
+      const source = vadAudioCtx.createMediaStreamSource(persistentMicStream);
+      const analyser = vadAudioCtx.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      const timeData = new Uint8Array(analyser.fftSize);
 
-      recognition.onresult = (event) => {
-        if (isAiSpeaking) return;
-        let finalTxt = "";
-        let interim = "";
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) finalTxt += event.results[i][0].transcript.trim();
-          else interim += event.results[i][0].transcript;
+      let isRecordingSpeech = false;
+      let speechStartedAt = 0;
+      let lastVoiceAt = 0;
+      let voiceStreak = 0; // 연속으로 말소리가 감지된 횟수 (단발성 노이즈/기침 무시)
+      let baselineRms = 0.02; // 주변 배경 소음 자동 보정치
+      let chunks = [];
+
+      vadLoopTimer = setInterval(() => {
+        if (!handsFreeOn || !persistentMicStream || !persistentMicStream.active) return;
+        if (isAiSpeaking) return; // AI가 답변 음성을 읽는 동안에는 에코 유입 방지
+
+        // 시간 영역(Time-Domain) 실제 음압(RMS) 계산 -> 백색소음과 실제 사람 목소리를 정확히 구분
+        analyser.getByteTimeDomainData(timeData);
+        let sumSq = 0;
+        for (let i = 0; i < timeData.length; i++) {
+          const norm = (timeData[i] - 128) / 128.0;
+          sumSq += norm * norm;
         }
-        if (interim) tBox.innerText = "🎙️ 듣는 중: " + interim;
-        if (finalTxt) {
-          const requireWake = document.getElementById("wake-check").checked;
-          const wakeWords = ["요쿡아", "요쿠가", "요쿡", "요국아", "요코가", "여쿡아"];
-          if (requireWake && !wakeWords.some(w => finalTxt.includes(w))) {
-            tBox.innerText = `💤 ('요쿡아'를 붙여 말씀해 주세요) "${finalTxt}"`;
-            return;
+        const rms = Math.sqrt(sumSq / timeData.length);
+        const now = Date.now();
+
+        // 말을 하고 있지 않을 때는 주변 환경 소음(에어컨, 환풍기 등) 기준점을 부드럽게 자동 학습
+        if (!isRecordingSpeech && rms < 0.08) {
+          baselineRms = baselineRms * 0.92 + rms * 0.08;
+        }
+
+        // 주변 소음의 3.2배 이상이면서 최소 음압(0.065)을 넘는 또렷한 사람 목소리만 감지
+        const speechThreshold = Math.max(0.065, Math.min(0.18, baselineRms * 3.2));
+
+        if (rms > speechThreshold) {
+          voiceStreak++;
+          lastVoiceAt = now;
+          // 최소 2회 연속(약 180ms 이상) 또렷한 목소리가 이어질 때만 녹음 시작 (백색소음/탁 치는 소리 무시)
+          if (!isRecordingSpeech && voiceStreak >= 2) {
+            isRecordingSpeech = true;
+            speechStartedAt = now;
+            chunks = [];
+            try {
+              activeRecorder = new MediaRecorder(persistentMicStream);
+              activeRecorder.ondataavailable = (e) => {
+                if (e.data && e.data.size > 0) chunks.push(e.data);
+              };
+              activeRecorder.onstop = () => {
+                const duration = Date.now() - speechStartedAt;
+                // 최소 0.7초 이상 실제로 말한 오디오만 Whisper로 전송
+                if (chunks.length > 0 && duration >= 700 && handsFreeOn) {
+                  const blob = new Blob(chunks, { type: "audio/webm" });
+                  const requireWake = document.getElementById("wake-check").checked;
+                  sendAudioBlobToWhisper(blob, requireWake);
+                } else if (handsFreeOn) {
+                  tBox.innerText = "🎙️ 핸즈프리 대기 중... ('요쿡아'라고 말씀해 보세요)";
+                }
+              };
+              activeRecorder.start();
+              tBox.innerText = "🗣️ 말씀하시는 중... (말씀을 마치면 자동으로 분석합니다)";
+            } catch (e) {
+              isRecordingSpeech = false;
+            }
           }
-          sendVoiceTextToBackend(finalTxt);
+        } else {
+          voiceStreak = 0;
         }
-      };
 
-      recognition.onend = () => {
-        if (handsFreeOn) {
-          try { recognition.start(); } catch (e) {}
+        // 말을 시작한 뒤 1.0초 이상 침묵이 이어지거나 최대 7초가 지나면 자동으로 녹음 완료 후 Whisper 전송
+        if (isRecordingSpeech && ((now - lastVoiceAt > 1000) || (now - speechStartedAt > 7000))) {
+          isRecordingSpeech = false;
+          voiceStreak = 0;
+          if (activeRecorder && activeRecorder.state === "recording") {
+            try { activeRecorder.stop(); } catch (e) {}
+          }
         }
-      };
-      try { recognition.start(); } catch (e) {}
+      }, 90);
     }
 
     // Whisper STT 직접 녹음 전송 (모든 모바일/브라우저 100% 호환)
@@ -1435,12 +1563,16 @@
       const tBox = document.getElementById("voice-transcript");
       const rBox = document.getElementById("voice-ai-reply");
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // 이미 열려 있는 마이크 스트림이 있으면 재사용하여 추가 권한 팝업 방지
+        const useExisting = persistentMicStream && persistentMicStream.active;
+        const stream = useExisting ? persistentMicStream : await navigator.mediaDevices.getUserMedia({ audio: true });
         const recorder = new MediaRecorder(stream);
         const chunks = [];
         recorder.ondataavailable = e => chunks.push(e.data);
         recorder.onstop = async () => {
-          stream.getTracks().forEach(t => t.stop());
+          if (!useExisting) {
+            stream.getTracks().forEach(t => t.stop());
+          }
           btn.innerText = "⏳ Whisper 분석 중...";
           const blob = new Blob(chunks, { type: "audio/webm" });
           const fd = new FormData();
