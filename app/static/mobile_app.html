@@ -1023,6 +1023,7 @@
           ph.style.display = "block";
           badge.innerText = "📷 실시간 AI 비전 대기 중";
         }
+        applyVisionState("SAFE", "✅ 현재 주방은 안전합니다. 안심하고 조리하세요!");
         return;
       }
 
@@ -1186,6 +1187,7 @@
         ph.style.display = "block";
         btn.innerText = "📷 내 카메라 켜기";
         badge.innerText = "📷 실시간 AI 비전 대기 중";
+        applyVisionState("SAFE", "✅ 현재 주방은 안전합니다. 안심하고 조리하세요!");
         return;
       }
 

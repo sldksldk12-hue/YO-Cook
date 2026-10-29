@@ -305,10 +305,10 @@ def _sync_active_session_step_flags(db: Session, session_id: Optional[int] = Non
 def get_current_vision_status() -> dict:
     """
     현재 주방의 실시간 안전 상태 및 현재 조리 단계의 안전 감지 모드를 반환합니다.
-    비전 모듈로부터 일정 시간(STATE_EXPIRY_SEC) 동안 새로운 위험 신호가 없으면 SAFE로 자동 복귀합니다.
+    비전 모듈로부터 일정 시간(STATE_EXPIRY_SEC) 동안 새로운 카메라 신호가 없으면 상태와 메시지를 모두 SAFE로 자동 복귀합니다.
     """
     now = time.time()
-    if vision_state["status"] != "SAFE" and (now - vision_state["updated_at"] > STATE_EXPIRY_SEC):
+    if now - vision_state["updated_at"] > STATE_EXPIRY_SEC:
         vision_state["status"] = "SAFE"
         vision_state["hazard_type"] = "NONE"
         vision_state["message"] = "[안전] 현재 주방은 안전합니다."
@@ -646,7 +646,18 @@ async def ws_user_mirror(websocket: WebSocket, user_id: int, role: str = "viewer
                     continue
                 if msg_type == "STOP":
                     stream["updated_at"] = 0.0
-                    await _broadcast_to_viewers(uid, {"type": "STOP", "is_streaming": False})
+                    stream["status"] = "SAFE"
+                    stream["message"] = "[안전] 현재 주방은 안전합니다."
+                    stream["unattended_tracker"].reset()
+                    vision_state["status"] = "SAFE"
+                    vision_state["hazard_type"] = "NONE"
+                    vision_state["message"] = "[안전] 현재 주방은 안전합니다."
+                    await _broadcast_to_viewers(uid, {
+                        "type": "STOP",
+                        "is_streaming": False,
+                        "status": "SAFE",
+                        "message": "[안전] 현재 주방은 안전합니다.",
+                    })
                     continue
 
                 frame_b64 = data.get("frame_b64")
@@ -689,7 +700,18 @@ async def ws_user_mirror(websocket: WebSocket, user_id: int, role: str = "viewer
                         asyncio.create_task(_run_background_ai_on_stream(uid, frame_b64, websocket))
         except WebSocketDisconnect:
             stream["updated_at"] = 0.0
-            await _broadcast_to_viewers(uid, {"type": "STOP", "is_streaming": False})
+            stream["status"] = "SAFE"
+            stream["message"] = "[안전] 현재 주방은 안전합니다."
+            stream["unattended_tracker"].reset()
+            vision_state["status"] = "SAFE"
+            vision_state["hazard_type"] = "NONE"
+            vision_state["message"] = "[안전] 현재 주방은 안전합니다."
+            await _broadcast_to_viewers(uid, {
+                "type": "STOP",
+                "is_streaming": False,
+                "status": "SAFE",
+                "message": "[안전] 현재 주방은 안전합니다.",
+            })
         except Exception:
             pass
 
