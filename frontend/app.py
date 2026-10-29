@@ -6,7 +6,7 @@ import uuid
 import base64
 import hashlib
 import time
-import cv2  # [추가] 실제 웹캠 프레임을 캡처하기 위해 OpenCV 임포트
+import cv2  
 import api_client
 import recipe_viewer
 
@@ -41,7 +41,6 @@ if "wake_word" not in st.session_state:
 # ----------------------------------------
 
 def handle_voice_api_result(result: dict):
-    """백엔드 음성/대화 API 응답을 받아 세션 단계 동기화 및 대화 히스토리에 저장합니다."""
     if result.get("status") != "success":
         st.error(result.get("message", "음성 처리 중 오류가 발생했습니다."))
         return
@@ -68,19 +67,24 @@ col_left, col_right = st.columns([1.1, 1], gap="large")
 
 # [우측 영역] AI 실시간 인터랙션 (비전 + 자연어)
 with col_right:
-    # 1. 비전 섹션
     st.header("📷 실시간 주방 모니터링 (Vision)")
     st.info("웹캠 기반 실시간 객체 탐지(YOLOv8) 및 위험 상황 경고 화면이 연동됩니다.")
     
     is_monitoring = st.toggle("🚨 실시간 위험 감지 켜기", value=False)
     
-    # 웹캠 화면과 경고 메시지를 업데이트할 빈 공간(Placeholder) 할당
     vision_placeholder = st.empty()
     alert_placeholder = st.empty()
 
     if is_monitoring:
-        # OpenCV로 0번(기본) 웹캠을 켭니다.
         cap = cv2.VideoCapture(0)
+        
+        # [안정화 1] 모바일 화면 및 레이아웃 유지를 위한 웹캠 해상도 고정
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        
+        # [안정화 2] 서버 과부하 방지를 위한 FPS 제한 설정 (초당 10프레임 전송)
+        FPS_LIMIT = 10
+        last_request_time = 0
         
         while is_monitoring:
             ret, frame = cap.read()
@@ -88,38 +92,39 @@ with col_right:
                 alert_placeholder.error("웹캠을 찾을 수 없습니다. 카메라 연결을 확인해 주세요.")
                 break
                 
-            # 찍힌 프레임을 JPG 이미지로 변환 (백엔드 전송용)
-            _, buffer = cv2.imencode('.jpg', frame)
-            files = {"file": ("frame.jpg", buffer.tobytes(), "image/jpeg")}
+            current_time = time.time()
             
-            try:
-                # [수정] 희준님의 실제 비전 API(/api/vision/detect)로 이미지 프레임을 쏘고 판정 받기
-                res = requests.post("http://localhost:8000/api/vision/detect", files=files)
+            # 지정된 FPS 주기에 도달했을 때만 백엔드에 프레임 전송
+            if current_time - last_request_time >= (1.0 / FPS_LIMIT):
+                last_request_time = current_time
                 
-                if res.status_code == 200:
-                    vision_data = res.json()
-                    status = vision_data.get("vision_status", "SAFE")
-                    msg = vision_data.get("message", "안전합니다.")
-                    
-                    # 화면 출력을 위해 색상 변환 (BGR -> RGB)
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    vision_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
-                    
-                    # 상태에 따른 UI 경고 표시 
-                    if status == "DANGER":
-                        alert_placeholder.error(f"🚨 {msg}", icon="🔥")
-                    elif status == "WARNING":
-                        alert_placeholder.warning(f"⚠️ {msg}", icon="⚠️")
-                    else:
-                        alert_placeholder.success(f"✅ {msg}", icon="🛡️")
-            except Exception as e:
-                alert_placeholder.error("비전 서버와 연결할 수 없습니다.")
-                time.sleep(2)
+                _, buffer = cv2.imencode('.jpg', frame)
+                files = {"file": ("frame.jpg", buffer.tobytes(), "image/jpeg")}
                 
-        # 모니터링 토글을 끄면 웹캠 자원 해제
+                try:
+                    res = requests.post("http://localhost:8000/api/vision/detect", files=files)
+                    
+                    if res.status_code == 200:
+                        vision_data = res.json()
+                        status = vision_data.get("vision_status", "SAFE")
+                        msg = vision_data.get("message", "안전합니다.")
+                        
+                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        vision_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
+                        
+                        if status == "DANGER":
+                            alert_placeholder.error(f"🚨 {msg}", icon="🔥")
+                        elif status == "WARNING":
+                            alert_placeholder.warning(f"⚠️ {msg}", icon="⚠️")
+                        else:
+                            alert_placeholder.success(f"✅ {msg}", icon="🛡️")
+                except Exception as e:
+                    alert_placeholder.error("비전 서버와 연결이 지연되고 있습니다. 잠시만 기다려주세요.")
+                    time.sleep(1) # 에러 시 추가 과부하 방지
+                
         cap.release()
     else:
-        vision_placeholder.image("https://via.placeholder.com/600x320?text=Webcam+Off", use_column_width=True)
+        vision_placeholder.image("https://via.placeholder.com/640x480?text=Webcam+Off", use_container_width=True)
         alert_placeholder.empty()
 
     st.markdown("---")
@@ -155,7 +160,6 @@ with col_right:
 
         st.info("음성 명령을 통해 다음 요리 단계나 대체 식재료를 질문해 보세요.")
 
-        # [모드 A] 완전 핸즈프리(Hands-Free) 상시 음성 대화 모드
         hands_free = st.toggle(
             "🟢 핸즈프리 연속 음성 대화 켜기 (손 안 대고 말하기)",
             value=False,
@@ -274,7 +278,6 @@ with col_right:
             """
             components.html(hands_free_html, height=165)
 
-        # [모드 B] 원터치 실시간 마이크 대화
         live_audio = st.audio_input("🎤 마이크로 바로 말하기 (말이 끝나면 자동 전송됩니다)")
         if live_audio is not None:
             audio_bytes_raw = live_audio.getvalue()
@@ -293,7 +296,6 @@ with col_right:
                     except Exception as e:
                         st.error(f"백엔드 서버에 연결할 수 없습니다.\n에러 내용: {e}")
 
-        # 최근 음성 대화 내역 및 자동 음성 출력
         if st.session_state.chat_history:
             latest = st.session_state.chat_history[-1]
             with st.container(border=True):
@@ -304,7 +306,6 @@ with col_right:
                     audio_bytes = base64.b64decode(latest["audio_base64"])
                     st.audio(audio_bytes, format="audio/mp3", autoplay=True)
 
-        # [모드 C] 음성 질문 파일 업로드
         with st.expander("📂 음성 질문 파일 업로드 (.mp3, .wav)", expanded=False):
             uploaded_audio = st.file_uploader("음성 질문 파일 업로드 (.mp3, .wav)", type=["mp3", "wav"])
             if st.button("질문 전송", use_container_width=True):
@@ -325,6 +326,5 @@ with col_right:
                 else:
                     st.warning("먼저 음성 파일을 업로드해 주세요.")
 
-# [좌측 영역] 레시피 가이드
 with col_left:
     selected_recipe_id = render_recipe_viewer()
