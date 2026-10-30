@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from app.services.rag import generate_session_aware_answer
 from app.models.database import get_db
 from app.models.user import User
-from app.api.vision import get_current_vision_status, _sync_active_session_step_flags
+from app.api.vision import get_current_vision_status, _sync_active_session_step_flags, sync_user_session_step
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -192,13 +192,16 @@ async def process_audio(
         if len(recognized_text) <= 1 or any(h in recognized_text for h in WHISPER_HALLUCINATIONS):
             recognized_text = ""
 
-        return _build_voice_response(
+        res = _build_voice_response(
             recognized_text,
             session_code,
             db,
             user_id=user_id or 1,
             require_wake_word=bool(require_wake_word),
         )
+        if res.get("status") == "success" and res.get("current_step") is not None:
+            await sync_user_session_step(user_id or 1, res.get("session_id"), res.get("current_step"))
+        return res
     except Exception as e:
         return {"status": "error", "message": str(e)}
     finally:
@@ -213,7 +216,10 @@ async def process_text_conversation(
 ):
     """브라우저 실시간 음성 인식(Web Speech) 또는 텍스트 질문에 대해 즉시 RAG 답변과 TTS 음성을 반환합니다."""
     try:
-        return _build_voice_response(payload.text, payload.session_code, db, payload.user_id or 1)
+        res = _build_voice_response(payload.text, payload.session_code, db, payload.user_id or 1)
+        if res.get("status") == "success" and res.get("current_step") is not None:
+            await sync_user_session_step(payload.user_id or 1, res.get("session_id"), res.get("current_step"))
+        return res
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

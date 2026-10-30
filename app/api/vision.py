@@ -460,6 +460,23 @@ async def _broadcast_to_viewers(uid: int, payload: dict):
         viewers.discard(ws)
 
 
+async def sync_user_session_step(uid: int, session_id: Optional[int], current_step: Optional[int]):
+    """
+    음성 명령(핸즈프리/녹음)이나 버튼 클릭으로 조리 세션/단계가 변경되었을 때
+    메모리 스트림 상태를 즉시 갱신하고 동일 아이디로 접속 중인 모든 PC/모바일 뷰어에게 WebSocket으로 즉시 동기화합니다.
+    """
+    stream = _ensure_user_stream(uid or 1)
+    if session_id is not None:
+        stream["session_id"] = session_id
+    if current_step is not None:
+        stream["current_step"] = current_step
+    await _broadcast_to_viewers(uid or 1, {
+        "type": "STEP_SYNC",
+        "active_session_id": stream.get("session_id"),
+        "current_step": stream.get("current_step", 1),
+    })
+
+
 async def _run_background_ai_on_stream(uid: int, frame_b64: str, sender_ws: WebSocket):
     """
     WebSocket으로 수신된 최신 프레임에 대해 백그라운드 워커 스레드에서 YOLO + MediaPipe + 자리비움 추론을 수행하고,
@@ -673,6 +690,8 @@ async def ws_user_mirror(websocket: WebSocket, user_id: int, role: str = "viewer
                         stream["frame_h"] = data["frame_h"]
                     if data.get("session_id"):
                         stream["session_id"] = data["session_id"]
+                    if data.get("current_step"):
+                        stream["current_step"] = data["current_step"]
                     if "fire_on" in data and data["fire_on"] is not None:
                         stream["fire_on"] = bool(data["fire_on"])
 

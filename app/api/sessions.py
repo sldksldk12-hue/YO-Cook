@@ -29,7 +29,7 @@ router = APIRouter()
     summary="요리 세션 시작",
     description="선택한 레시피로 실시간 조리 세션을 생성하고 고유 session_id를 발급합니다."
 )
-def start_cooking_session(
+async def start_cooking_session(
     payload: SessionStartRequest,
     db: Session = Depends(get_db)
 ):
@@ -67,6 +67,9 @@ def start_cooking_session(
     db.add(new_session)
     db.commit()
     db.refresh(new_session)
+
+    from app.api.vision import sync_user_session_step
+    await sync_user_session_step(new_session.user_id or 1, new_session.id, new_session.current_step)
 
     total_steps = len(recipe.steps)
 
@@ -140,7 +143,7 @@ def get_session_detail(
     summary="조리 단계 이동 (다음/이전/지정)",
     description="사용자의 음성 명령이나 버튼 클릭에 따라 조리 단계를 앞뒤로 이동합니다."
 )
-def update_session_step(
+async def update_session_step(
     session_id: int,
     payload: StepUpdateRequest,
     db: Session = Depends(get_db)
@@ -166,6 +169,9 @@ def update_session_step(
 
     db.commit()
     db.refresh(session)
+
+    from app.api.vision import sync_user_session_step
+    await sync_user_session_step(session.user_id or 1, session.id, session.current_step)
 
     # 갱신된 현재 단계 상세 정보 조회
     current_step_obj = None
